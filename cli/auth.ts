@@ -32,7 +32,7 @@ export let configureAuthCli = (cli: Argv) =>
     .option("account", {
       type: "string",
       default: DEFAULT_ACCOUNT,
-      describe: "Token account name (writes .mailmaster/tokens/<account>.json)",
+      describe: "Token account name (writes .mailmon/tokens/<account>.json)",
     })
     .option("verbose", {
       alias: "v",
@@ -40,14 +40,14 @@ export let configureAuthCli = (cli: Argv) =>
       default: false,
       describe: "Print diagnostic details to stderr",
     })
-    .example("$0 --account=personal", "Run OAuth and save token to .mailmaster/tokens/personal.json")
+    .example("$0 --account=personal", "Run OAuth and save token to .mailmon/tokens/personal.json")
     .epilog(
       [
         "Output:",
         "- Prints `Saved <absolute token path>` on success.",
         "- The token file is used by `mail` commands via the same `--account` value.",
-        "- Reads credentials from `./.mailmaster/credentials.json`, then `<mailmaster-install-dir>/.mailmaster/credentials.json`, then `~/.mailmaster/credentials.json`.",
-        "- Writes token to `./.mailmaster/tokens/` in the current working directory.",
+        "- Reads credentials from `./.mailmon/credentials.json`, then `<mailmon-install-dir>/.mailmon/credentials.json`, then `~/.mailmon/credentials.json`.",
+        "- Writes token to `./.mailmon/tokens/` in the current working directory.",
       ].join("\n"),
     )
     .strict()

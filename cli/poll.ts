@@ -97,7 +97,7 @@ export let configurePollCli = (cli: Argv) =>
     .option("account", {
       type: "string",
       default: DEFAULT_ACCOUNT,
-      describe: "Token account name (uses .mailmaster/tokens/<account>.json)",
+      describe: "Token account name (uses .mailmon/tokens/<account>.json)",
     })
     .option("interval-ms", {
       type: "number",

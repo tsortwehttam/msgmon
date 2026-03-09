@@ -3,11 +3,12 @@ import { hideBin } from "yargs/helpers"
 import { parseAccountsCli } from "./accounts"
 import { parseAuthCli } from "./auth"
 import { parseMailCli } from "./mail"
+import { parseMonitorCli } from "./monitor"
 import { parsePollCli } from "./poll"
 import { verboseLog } from "../src/Verbose"
 
 let args = hideBin(process.argv)
-let subcommands = new Set(["mail", "auth", "accounts", "poll"])
+let subcommands = new Set(["mail", "auth", "accounts", "poll", "monitor"])
 let verbose = args.includes("--verbose") || args.includes("-v")
 let commandIndex = args.findIndex(x => !x.startsWith("-"))
 let command = commandIndex >= 0 ? args[commandIndex] : undefined
@@ -16,7 +17,7 @@ let forwardedVerboseArgs = verbose ? ["--verbose"] : []
 let dispatched = false
 
 let cli = yargs(args)
-  .scriptName("mailmaster")
+  .scriptName("mailmon")
   .usage("Usage: $0 <command> [subcommand/options]")
   .option("verbose", {
     alias: "v",
@@ -28,13 +29,14 @@ let cli = yargs(args)
   .command("auth", "Run OAuth flow and store/update token for an account")
   .command("accounts", "List token-backed accounts available to this CLI")
   .command("poll", "Poll for Gmail query matches and emit JSON when found")
+  .command("monitor", "Monitor Gmail query matches and run an agent command for each new message")
   .command(
     "help [command]",
     "Show main help or help for a specific subcommand",
     y =>
       y.positional("command", {
         type: "string",
-        choices: ["mail", "auth", "accounts", "poll"] as const,
+        choices: ["mail", "auth", "accounts", "poll", "monitor"] as const,
         describe: "Subcommand to show help for",
       }),
     async argv => {
@@ -42,10 +44,11 @@ let cli = yargs(args)
         cli.showHelp()
         return
       }
-      if (argv.command === "mail") return parseMailCli(["--help"], "mailmaster mail")
-      if (argv.command === "auth") return parseAuthCli(["--help"], "mailmaster auth")
-      if (argv.command === "poll") return parsePollCli(["--help"], "mailmaster poll")
-      return parseAccountsCli(["--help"], "mailmaster accounts")
+      if (argv.command === "mail") return parseMailCli(["--help"], "mailmon mail")
+      if (argv.command === "auth") return parseAuthCli(["--help"], "mailmon auth")
+      if (argv.command === "poll") return parsePollCli(["--help"], "mailmon poll")
+      if (argv.command === "monitor") return parseMonitorCli(["--help"], "mailmon monitor")
+      return parseAccountsCli(["--help"], "mailmon accounts")
     },
   )
   .example("$0 help", "Show top-level help")
@@ -67,17 +70,22 @@ let cli = yargs(args)
     "$0 poll --account=personal --query='category:promotions is:unread' --interval-ms=2000",
     "Poll for query matches and emit JSON once found",
   )
+  .example(
+    "$0 monitor --account=personal --query='in:inbox is:unread' --agent-cmd='codex run \"Read TASK.md and process.\"'",
+    "Monitor and invoke an agent command per new matched message",
+  )
   .epilog(
     [
       "Automation notes:",
       "- `mail` outputs JSON.",
       "- `accounts` outputs JSON by default (`--format=text` for line output).",
       "- `poll` outputs JSON once query matches exist, then exits.",
+      "- `monitor` runs continuously and invokes `--agent-cmd` for each newly seen message id.",
       "- `auth` prints a success line with the saved token path.",
       "- `--verbose` can be used at top-level or subcommand level for stderr diagnostics.",
       "- Use `mail --help` and `mail send --help` for full option/behavior contracts.",
       "- Account selection is always via `--account` (default: \"default\").",
-      "- `help <command>` is supported for: mail, auth, accounts, poll.",
+      "- `help <command>` is supported for: mail, auth, accounts, poll, monitor.",
     ].join("\n"),
   )
   .strict()
@@ -121,22 +129,27 @@ if (!dispatched && (args[0] === "--help" || args[0] === "-h")) {
 }
 
 if (!dispatched && command === "mail") {
-  parseMailCli([...forwardedVerboseArgs, ...commandArgs], "mailmaster mail").catch(e => {
+  parseMailCli([...forwardedVerboseArgs, ...commandArgs], "mailmon mail").catch(e => {
     console.error(e?.message ?? e)
     process.exit(1)
   })
 } else if (!dispatched && command === "auth") {
-  parseAuthCli([...forwardedVerboseArgs, ...commandArgs], "mailmaster auth").catch(e => {
+  parseAuthCli([...forwardedVerboseArgs, ...commandArgs], "mailmon auth").catch(e => {
     console.error(e?.message ?? e)
     process.exit(1)
   })
 } else if (!dispatched && command === "accounts") {
-  parseAccountsCli([...forwardedVerboseArgs, ...commandArgs], "mailmaster accounts").catch(e => {
+  parseAccountsCli([...forwardedVerboseArgs, ...commandArgs], "mailmon accounts").catch(e => {
     console.error(e?.message ?? e)
     process.exit(1)
   })
 } else if (!dispatched && command === "poll") {
-  parsePollCli([...forwardedVerboseArgs, ...commandArgs], "mailmaster poll").catch(e => {
+  parsePollCli([...forwardedVerboseArgs, ...commandArgs], "mailmon poll").catch(e => {
+    console.error(e?.message ?? e)
+    process.exit(1)
+  })
+} else if (!dispatched && command === "monitor") {
+  parseMonitorCli([...forwardedVerboseArgs, ...commandArgs], "mailmon monitor").catch(e => {
     console.error(e?.message ?? e)
     process.exit(1)
   })
@@ -147,13 +160,15 @@ if (!dispatched && command === "mail") {
   }
   let subhelp = commandArgs[0]
   if (subhelp === "mail") {
-    parseMailCli([...forwardedVerboseArgs, "--help"], "mailmaster mail")
+    parseMailCli([...forwardedVerboseArgs, "--help"], "mailmon mail")
   } else if (subhelp === "auth") {
-    parseAuthCli([...forwardedVerboseArgs, "--help"], "mailmaster auth")
+    parseAuthCli([...forwardedVerboseArgs, "--help"], "mailmon auth")
   } else if (subhelp === "poll") {
-    parsePollCli([...forwardedVerboseArgs, "--help"], "mailmaster poll")
+    parsePollCli([...forwardedVerboseArgs, "--help"], "mailmon poll")
+  } else if (subhelp === "monitor") {
+    parseMonitorCli([...forwardedVerboseArgs, "--help"], "mailmon monitor")
   } else if (subhelp === "accounts") {
-    parseAccountsCli([...forwardedVerboseArgs, "--help"], "mailmaster accounts")
+    parseAccountsCli([...forwardedVerboseArgs, "--help"], "mailmon accounts")
   } else {
     cli.parseAsync().catch(e => {
       console.error(e?.message ?? e)

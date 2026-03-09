@@ -6,14 +6,14 @@ import { fileURLToPath } from "node:url"
 export let DEFAULT_ACCOUNT = "default"
 
 export let APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
-export let LOCAL_CONFIG_DIRNAME = ".mailmaster"
+export let LOCAL_CONFIG_DIRNAME = ".mailmon"
 export let PWD_CONFIG_DIR = path.resolve(process.cwd(), LOCAL_CONFIG_DIRNAME)
 export let APP_CONFIG_DIR = path.resolve(APP_DIR, LOCAL_CONFIG_DIRNAME)
 export let PWD_CREDENTIALS_PATH = path.resolve(PWD_CONFIG_DIR, "credentials.json")
 export let PWD_TOKENS_DIR = path.resolve(PWD_CONFIG_DIR, "tokens")
 export let APP_CREDENTIALS_PATH = path.resolve(APP_CONFIG_DIR, "credentials.json")
 export let APP_TOKENS_DIR = path.resolve(APP_CONFIG_DIR, "tokens")
-export let GLOBAL_CONFIG_DIR = path.resolve(os.homedir(), ".mailmaster")
+export let GLOBAL_CONFIG_DIR = path.resolve(os.homedir(), ".mailmon")
 export let GLOBAL_CREDENTIALS_PATH = path.resolve(GLOBAL_CONFIG_DIR, "credentials.json")
 export let GLOBAL_TOKENS_DIR = path.resolve(GLOBAL_CONFIG_DIR, "tokens")
 export let TOKEN_FILE_EXTENSION = ".json"

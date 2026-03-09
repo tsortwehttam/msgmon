@@ -41,7 +41,7 @@ export let configureAccountsCli = (cli: Argv) =>
     .epilog(
       [
         "Output contract:",
-        "- json: array of account names derived from `./.mailmaster/tokens/*.json`, `<mailmaster-install-dir>/.mailmaster/tokens/*.json`, and `~/.mailmaster/tokens/*.json`.",
+        "- json: array of account names derived from `./.mailmon/tokens/*.json`, `<mailmon-install-dir>/.mailmon/tokens/*.json`, and `~/.mailmon/tokens/*.json`.",
         "- text: one account name per line.",
       ].join("\n"),
     )

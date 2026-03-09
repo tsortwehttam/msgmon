@@ -135,7 +135,7 @@ let buildRawMessage = (params: {
     `Date: ${new Date().toUTCString()}`,
     `Message-ID: ${normalizeMessageId(params.messageId) ?? buildMessageId(params.from)}`,
     "MIME-Version: 1.0",
-    "X-Mailer: mailmaster/1.0",
+    "X-Mailer: mailmon/1.0",
   ]
 
   if (params.attach.length === 0) {
@@ -145,7 +145,7 @@ let buildRawMessage = (params: {
     )
   }
 
-  let boundary = `mailmaster_${Date.now()}_${Math.random().toString(36).slice(2)}`
+  let boundary = `mailmon_${Date.now()}_${Math.random().toString(36).slice(2)}`
   let parts = [
     `--${boundary}\r\nContent-Type: text/plain; charset="UTF-8"\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n${encodeQuotedPrintable(params.body)}\r\n`,
     ...params.attach.map(filePath => {
@@ -171,7 +171,7 @@ export let configureMailCli = (cli: Argv) =>
     .option("account", {
       type: "string",
       default: DEFAULT_ACCOUNT,
-      describe: "Token account name (uses .mailmaster/tokens/<account>.json)",
+      describe: "Token account name (uses .mailmon/tokens/<account>.json)",
     })
     .option("verbose", {
       alias: "v",
@@ -426,7 +426,7 @@ export let configureMailCli = (cli: Argv) =>
         "- `mark-read` removes the `UNREAD` label from the specified message id.",
         "- `archive` removes the `INBOX` label from the specified message id.",
         "- Requires OAuth scope `https://www.googleapis.com/auth/gmail.modify`.",
-        "- If your existing token predates this scope, rerun `mailmaster auth --account=<name>`.",
+        "- If your existing token predates this scope, rerun `mailmon auth --account=<name>`.",
         "",
         "Send behavior notes:",
         "- `--yes` is required to send (safety flag).",

@@ -1,6 +1,6 @@
-# mailmaster
+# mailmon
 
-`mailmaster` is a Gmail CLI for account auth, account discovery, message search/read, and message sending (including threading and attachments).
+`mailmon` is a Gmail CLI for account auth, account discovery, message search/read, message sending, and continuous monitoring that can invoke an agent per message.
 
 ## Install
 
@@ -13,49 +13,76 @@ npm link
 Then run:
 
 ```bash
-mailmaster --help
+mailmon --help
 ```
 
 To remove the global link later:
 
 ```bash
-npm unlink -g mailmaster
+npm unlink -g mailmon
 ```
+
+## Gmail Setup (OAuth)
+
+`mailmon` uses Gmail API OAuth (not IMAP/SMTP app passwords).
+
+1. In Google Cloud, create/select a project, enable `Gmail API`, configure the OAuth consent screen, and create an OAuth Client ID (Desktop app is the simplest choice).
+2. Download the client JSON and save it as one of:
+   - `./.mailmon/credentials.json` (preferred)
+   - `~/.mailmon/credentials.json`
+3. Run auth to create a token for an account name:
+
+```bash
+mailmon auth --account=personal
+```
+
+4. Verify access:
+
+```bash
+mailmon accounts --format=text
+mailmon mail --account=personal search "in:inbox is:unread"
+```
+
+Notes:
+- If your OAuth app is in testing mode, add your Gmail address as a test user.
+- The tool requests these scopes: `gmail.readonly`, `gmail.modify`, `gmail.send`.
 
 ## Configuration Resolution
 
-`mailmaster` supports both local project config and global home config.
+`mailmon` supports both local project config and global home config.
 
 - Credentials path resolution:
-  - `./.mailmaster/credentials.json` (current working directory, preferred if present)
-  - `<mailmaster-install-dir>/.mailmaster/credentials.json`
-  - `~/.mailmaster/credentials.json` (fallback)
+  - `./.mailmon/credentials.json` (current working directory, preferred if present)
+  - `<mailmon-install-dir>/.mailmon/credentials.json`
+  - `~/.mailmon/credentials.json` (fallback)
 - Token read locations:
-  - `./.mailmaster/tokens/*.json` (current working directory)
-  - `<mailmaster-install-dir>/.mailmaster/tokens/*.json`
-  - `~/.mailmaster/tokens/*.json`
-- Token write location (`mailmaster auth`):
-  - `./.mailmaster/tokens/` in the current working directory
+  - `./.mailmon/tokens/*.json` (current working directory)
+  - `<mailmon-install-dir>/.mailmon/tokens/*.json`
+  - `~/.mailmon/tokens/*.json`
+- Token write location (`mailmon auth`):
+  - `./.mailmon/tokens/` in the current working directory
 
-Accounts are token filenames without `.json` (for example `.mailmaster/tokens/personal.json` => account `personal`).
+Accounts are token filenames without `.json` (for example `.mailmon/tokens/personal.json` => account `personal`).
 
 ## Top-Level Usage
 
 ```bash
-mailmaster --help
-mailmaster help
-mailmaster help mail
-mailmaster help auth
-mailmaster help accounts
-mailmaster help poll
+mailmon --help
+mailmon help
+mailmon help mail
+mailmon help auth
+mailmon help accounts
+mailmon help poll
+mailmon help monitor
 ```
 
 Top-level commands:
 
-- `mailmaster mail ...`
-- `mailmaster auth ...`
-- `mailmaster accounts ...`
-- `mailmaster poll ...`
+- `mailmon mail ...`
+- `mailmon auth ...`
+- `mailmon accounts ...`
+- `mailmon poll ...`
+- `mailmon monitor ...`
 
 Global flag:
 
@@ -63,25 +90,25 @@ Global flag:
 
 ## Command Reference
 
-### `mailmaster auth`
+### `mailmon auth`
 
 Runs OAuth and writes a token for an account.
 
 ```bash
-mailmaster auth --account=personal
+mailmon auth --account=personal
 ```
 
 Output:
 
 - prints `Saved <absolute-path-to-token>`
 
-### `mailmaster accounts`
+### `mailmon accounts`
 
 Lists token-backed accounts available from pwd/install-dir/home token directories.
 
 ```bash
-mailmaster accounts --format=json
-mailmaster accounts --format=text
+mailmon accounts --format=json
+mailmon accounts --format=text
 ```
 
 Output contract:
@@ -89,7 +116,7 @@ Output contract:
 - `json` (default): JSON array of account names
 - `text`: one account per line
 
-### `mailmaster mail`
+### `mailmon mail`
 
 Subcommands:
 
@@ -102,8 +129,8 @@ Subcommands:
 #### Search
 
 ```bash
-mailmaster mail --account=personal search "from:alerts@example.com newer_than:7d"
-mailmaster mail --account=personal search "in:inbox is:unread" --fetch metadata
+mailmon mail --account=personal search "from:alerts@example.com newer_than:7d"
+mailmon mail --account=personal search "in:inbox is:unread" --fetch metadata
 ```
 
 Output:
@@ -120,7 +147,7 @@ Important search flags:
 #### Read
 
 ```bash
-mailmaster mail --account=personal read 190cf9f55b05efcc
+mailmon mail --account=personal read 190cf9f55b05efcc
 ```
 
 Output:
@@ -132,7 +159,7 @@ Output:
 Minimal send:
 
 ```bash
-mailmaster mail --account=personal send \
+mailmon mail --account=personal send \
   --to you@example.com \
   --subject "Hi" \
   --body "Hello" \
@@ -142,7 +169,7 @@ mailmaster mail --account=personal send \
 Reply/thread example:
 
 ```bash
-mailmaster mail --account=personal send \
+mailmon mail --account=personal send \
   --to you@example.com \
   --subject "Re: Status" \
   --body "Following up" \
@@ -156,7 +183,7 @@ mailmaster mail --account=personal send \
 Attachments/recipient example:
 
 ```bash
-mailmaster mail --account=personal send \
+mailmon mail --account=personal send \
   --to you@example.com \
   --cc team@example.com \
   --bcc audit@example.com \
@@ -184,7 +211,7 @@ Output:
 #### Mark Read
 
 ```bash
-mailmaster mail --account=personal mark-read 190cf9f55b05efcc
+mailmon mail --account=personal mark-read 190cf9f55b05efcc
 ```
 
 Output:
@@ -194,31 +221,31 @@ Output:
 #### Archive
 
 ```bash
-mailmaster mail --account=personal archive 190cf9f55b05efcc
+mailmon mail --account=personal archive 190cf9f55b05efcc
 ```
 
 Output:
 
 - JSON message object after update (includes fields such as `id`, `threadId`, `labelIds`)
 
-### `mailmaster poll`
+### `mailmon poll`
 
 Polls for Gmail query matches (default query: `is:unread`) until at least one message exists, then emits JSON and exits.
 
 ```bash
-mailmaster poll --account=personal
-mailmaster poll --query "in:inbox is:unread"
-mailmaster poll --query "category:promotions is:unread"
-mailmaster poll --query "in:inbox is:unread" --fetch metadata
-mailmaster poll --query "in:inbox is:unread" --fetch full
-mailmaster poll --query "in:inbox is:unread" --exit-when any-match
-mailmaster poll --interval-ms=2000 --out ./tmp/unread.json
+mailmon poll --account=personal
+mailmon poll --query "in:inbox is:unread"
+mailmon poll --query "category:promotions is:unread"
+mailmon poll --query "in:inbox is:unread" --fetch metadata
+mailmon poll --query "in:inbox is:unread" --fetch full
+mailmon poll --query "in:inbox is:unread" --exit-when any-match
+mailmon poll --interval-ms=2000 --out ./tmp/unread.json
 ```
 
 Pipe-friendly example:
 
 ```bash
-mailmaster poll --account=personal | jq '.messages[].id'
+mailmon poll --account=personal | jq '.messages[].id'
 ```
 
 Important poll flags:
@@ -234,6 +261,46 @@ Output:
 
 - One JSON object to `stdout` when the exit condition is met, then process exits.
 - JSON shape: `{ polledAt, account, query, exitWhen, messages, resolvedMessages? }`
+
+### `mailmon monitor`
+
+Continuously polls Gmail query matches and, for each newly seen message id, creates a run directory and executes your agent command in that directory.
+
+```bash
+mailmon monitor \
+  --account=personal \
+  --query "in:inbox is:unread" \
+  --agent-cmd 'codex run "Read TASK.md and process this message."'
+```
+
+Prompt and AGENTS.md example:
+
+```bash
+mailmon monitor \
+  --agent-cmd './my-agent.sh' \
+  --prompt-file ./prompt.md \
+  --agents-md ./AGENTS.md
+```
+
+Per-message run directory contents:
+
+- `message.json` full Gmail payload
+- `headers.json` header map
+- `body.txt` and/or `body.html`
+- `attachments/` extracted attachment files
+- `TASK.md` with your prompt and processing instructions
+
+Important monitor flags:
+
+- `--agent-cmd` required shell command to run per message
+- `--query` Gmail query to watch (default `is:unread`)
+- `--interval-ms` polling interval (default `5000`)
+- `--work-root` parent directory for per-message run folders (default system temp dir `/mailmon`)
+- `--state` state file path tracking processed message ids
+- `--prompt` inline task prompt text
+- `--prompt-file` load task prompt text from a file
+- `--agents-md` optional AGENTS.md copied into each run folder
+- `--mark-read` optionally remove `UNREAD` label after successful agent execution
 
 ## Agent-Friendly Notes
 
