@@ -2,7 +2,7 @@ import fs from "node:fs"
 import path from "node:path"
 import type { gmail_v1 } from "googleapis"
 
-let decodeBase64Url = (value?: string) => {
+export let decodeBase64Url = (value?: string) => {
   if (!value) return ""
   let normalized = value.replace(/-/g, "+").replace(/_/g, "/")
   let padded = normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4)
@@ -18,7 +18,7 @@ export let headerMap = (msg: gmail_v1.Schema$Message) => {
   return out
 }
 
-let pickBody = (part?: gmail_v1.Schema$MessagePart): { text?: string; html?: string } => {
+export let pickBody = (part?: gmail_v1.Schema$MessagePart): { text?: string; html?: string } => {
   if (!part) return {}
   if (part.mimeType === "text/plain") return { text: decodeBase64Url(part.body?.data ?? undefined) }
   if (part.mimeType === "text/html") return { html: decodeBase64Url(part.body?.data ?? undefined) }
@@ -29,14 +29,14 @@ let pickBody = (part?: gmail_v1.Schema$MessagePart): { text?: string; html?: str
   return {}
 }
 
-type FoundAttachment = {
+export type FoundAttachment = {
   filename: string
   mimeType?: string
   attachmentId?: string
   inlineData?: string
 }
 
-let collectAttachments = (part?: gmail_v1.Schema$MessagePart, out: FoundAttachment[] = []) => {
+export let collectAttachments = (part?: gmail_v1.Schema$MessagePart, out: FoundAttachment[] = []) => {
   if (!part) return out
   if (part.filename) {
     out.push({
