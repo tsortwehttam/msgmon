@@ -107,6 +107,7 @@ export let IngestRequest = z.object({
   query: z.string().default("is:unread"),
   maxResults: z.number().int().min(1).default(100),
   markRead: z.boolean().default(false),
+  seed: z.boolean().default(false),
   state: z.string().optional(),
 })
 export type IngestRequest = z.infer<typeof IngestRequest>

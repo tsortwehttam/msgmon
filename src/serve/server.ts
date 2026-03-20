@@ -356,6 +356,7 @@ let handleIngest = async (body: unknown) => {
     statePath,
     markRead: resolveMarkRead,
     doMarkRead: p.markRead,
+    seed: p.seed,
     verbose: false,
   })
 

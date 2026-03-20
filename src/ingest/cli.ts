@@ -121,6 +121,11 @@ let sharedOptions = (y: Argv) =>
       default: false,
       describe: "Mark messages as read after successful ingestion",
     })
+    .option("seed", {
+      type: "boolean",
+      default: false,
+      describe: "Record message IDs in state without emitting to sink (cold-start seeding for agents)",
+    })
     .option("state", {
       type: "string",
       describe: "Path to JSON state file tracking ingested message IDs (auto-derived if omitted)",
@@ -161,6 +166,7 @@ export let configureIngestCli = (cli: Argv) =>
           statePath,
           maxResults: argv.maxResults,
           markRead: argv.markRead,
+          seed: argv.seed,
         })
 
         let result = await ingestOnce({
@@ -171,6 +177,7 @@ export let configureIngestCli = (cli: Argv) =>
           statePath,
           markRead: resolveMarkRead,
           doMarkRead: argv.markRead,
+          seed: argv.seed,
           verbose: argv.verbose,
         })
 
@@ -190,6 +197,7 @@ export let configureIngestCli = (cli: Argv) =>
     .example("$0 --sink=dir --out-dir=./inbox --save-attachments", "Save messages + attachments to scannable directories")
     .example("$0 --sink=exec --exec-cmd='./handle.sh'", "Run a command for each new message")
     .example("$0 --query='is:unread' --mark-read", "Ingest unread messages and mark them read")
+    .example("$0 --seed --query='newer_than:30d' --max-results=500", "Seed state with recent history without emitting")
     .epilog(
       [
         "Output contract:",
@@ -201,6 +209,12 @@ export let configureIngestCli = (cli: Argv) =>
         "- Maintains a state file tracking ingested message IDs to avoid reprocessing.",
         "- State path is auto-derived from accounts + query, or set explicitly with --state.",
         "- Safe to run from cron — each run picks up only new messages.",
+        "",
+        "Seeding (cold start for agents):",
+        "- Use --seed to populate the state file without emitting messages to the sink.",
+        "- This lets an agent start from a clean baseline: seed history first, then run",
+        "  normally so only genuinely new messages trigger agent processing.",
+        "- Example: msgmon ingest --seed --query='newer_than:30d' --max-results=500",
       ].join("\n"),
     )
     .strict()
@@ -245,6 +259,7 @@ export let configureWatchCli = (cli: Argv) =>
           intervalMs: argv.intervalMs,
           maxResults: argv.maxResults,
           markRead: argv.markRead,
+          seed: argv.seed,
         })
 
         console.error(`[msgmon] watching ${accounts.join(", ")} — query: ${argv.query} — interval: ${argv.intervalMs}ms`)
@@ -257,6 +272,7 @@ export let configureWatchCli = (cli: Argv) =>
           statePath,
           markRead: resolveMarkRead,
           doMarkRead: argv.markRead,
+          seed: argv.seed,
           verbose: argv.verbose,
           intervalMs: argv.intervalMs,
         })

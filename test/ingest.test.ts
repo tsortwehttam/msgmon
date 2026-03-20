@@ -105,6 +105,7 @@ describe("ingestOnce", () => {
       sink,
       statePath,
       doMarkRead: false,
+      seed: false,
       verbose: false,
     })
 
@@ -129,6 +130,7 @@ describe("ingestOnce", () => {
       sink,
       statePath,
       doMarkRead: false,
+      seed: false,
       verbose: false,
     })
 
@@ -150,6 +152,7 @@ describe("ingestOnce", () => {
       sink,
       statePath,
       doMarkRead: false,
+      seed: false,
       verbose: false,
     })
 
@@ -173,6 +176,7 @@ describe("ingestOnce", () => {
       sink,
       statePath,
       doMarkRead: false,
+      seed: false,
       verbose: false,
     })
 
@@ -194,6 +198,7 @@ describe("ingestOnce", () => {
       statePath,
       markRead: async (msg) => { marked.push(msg.id) },
       doMarkRead: true,
+      seed: false,
       verbose: false,
     })
 
@@ -214,6 +219,7 @@ describe("ingestOnce", () => {
       statePath,
       markRead: async (msg) => { marked.push(msg.id) },
       doMarkRead: false,
+      seed: false,
       verbose: false,
     })
 
@@ -232,6 +238,7 @@ describe("ingestOnce", () => {
       sink,
       statePath,
       doMarkRead: false,
+      seed: false,
       verbose: false,
     })
 
@@ -258,10 +265,95 @@ describe("ingestOnce", () => {
       sink,
       statePath,
       doMarkRead: false,
+      seed: false,
       verbose: false,
     })
 
     assert.deepEqual(callLog, ["work", "personal"])
     assert.equal(sink.collected.length, 2)
+  })
+
+  it("seed mode records IDs without emitting to sink", async () => {
+    let messages = [makeMsg("msg-001"), makeMsg("msg-002")]
+    let source = makeMockSource(messages)
+    let sink = makeCollectorSink()
+    let statePath = path.join(tmpDir, "state.json")
+
+    let result = await ingestOnce({
+      sources: [{ source, accounts: ["test"] }],
+      query: "is:unread",
+      maxResults: 100,
+      sink,
+      statePath,
+      doMarkRead: false,
+      seed: true,
+      verbose: false,
+    })
+
+    assert.equal(result.ingested, 2)
+    assert.equal(result.scanned, 2)
+    assert.equal(sink.collected.length, 0)
+
+    let state = readIngestState(statePath)
+    assert.ok(state.ingested["msg-001"])
+    assert.ok(state.ingested["msg-002"])
+  })
+
+  it("seed mode skips markRead even when doMarkRead is true", async () => {
+    let marked: string[] = []
+    let source = makeMockSource([makeMsg("msg-001")])
+    let sink = makeCollectorSink()
+    let statePath = path.join(tmpDir, "state.json")
+
+    await ingestOnce({
+      sources: [{ source, accounts: ["test"] }],
+      query: "is:unread",
+      maxResults: 100,
+      sink,
+      statePath,
+      markRead: async (msg) => { marked.push(msg.id) },
+      doMarkRead: true,
+      seed: true,
+      verbose: false,
+    })
+
+    assert.deepEqual(marked, [])
+    assert.equal(sink.collected.length, 0)
+  })
+
+  it("normal ingest after seed skips seeded IDs", async () => {
+    let statePath = path.join(tmpDir, "state.json")
+    let source1 = makeMockSource([makeMsg("msg-001"), makeMsg("msg-002")])
+    let sink1 = makeCollectorSink()
+
+    await ingestOnce({
+      sources: [{ source: source1, accounts: ["test"] }],
+      query: "is:unread",
+      maxResults: 100,
+      sink: sink1,
+      statePath,
+      doMarkRead: false,
+      seed: true,
+      verbose: false,
+    })
+
+    // Now run normally with the same IDs plus a new one
+    let source2 = makeMockSource([makeMsg("msg-001"), makeMsg("msg-002"), makeMsg("msg-003")])
+    let sink2 = makeCollectorSink()
+
+    let result = await ingestOnce({
+      sources: [{ source: source2, accounts: ["test"] }],
+      query: "is:unread",
+      maxResults: 100,
+      sink: sink2,
+      statePath,
+      doMarkRead: false,
+      seed: false,
+      verbose: false,
+    })
+
+    assert.equal(result.ingested, 1)
+    assert.equal(sink2.collected.length, 1)
+    assert.equal(sink2.collected[0].id, "msg-003")
   })
 })

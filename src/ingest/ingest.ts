@@ -61,6 +61,7 @@ export type IngestParams = {
   statePath: string
   markRead?: (msg: UnifiedMessage, account: string) => Promise<void>
   doMarkRead: boolean
+  seed: boolean
   verbose: boolean
 }
 
@@ -85,10 +86,12 @@ export let ingestOnce = async (params: IngestParams): Promise<{ ingested: number
         scanned += 1
         if (state.ingested[msg.id]) continue
 
-        await params.sink.write(msg)
+        if (!params.seed) {
+          await params.sink.write(msg)
 
-        if (params.doMarkRead && params.markRead) {
-          await params.markRead(msg, account)
+          if (params.doMarkRead && params.markRead) {
+            await params.markRead(msg, account)
+          }
         }
 
         state.ingested[msg.id] = new Date().toISOString()

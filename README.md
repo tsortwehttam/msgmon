@@ -78,6 +78,7 @@ msgmon ingest --account=work --account=personal --sink=dir --out-dir=./inbox --s
 msgmon ingest --sink=ndjson > today.jsonl
 msgmon ingest --sink=exec --exec-cmd='./handle.sh' --mark-read
 msgmon ingest --query='from:billing@example.com' --state=./state.json
+msgmon ingest --seed --query='newer_than:30d' --max-results=500
 ```
 
 ### `msgmon watch`
@@ -133,7 +134,7 @@ Every request must include the header `X-Auth-Token: <token>`. All endpoints acc
 | `POST /api/slack/read` | Read a message (`{ channel, ts, account? }`) |
 | `POST /api/slack/send` | Post a message (`{ channel, text?, account?, threadTs?, asUser?, attachments? }`) |
 | `POST /api/slack/accounts` | List Slack workspaces (`{}`) |
-| `POST /api/ingest` | One-shot ingest (`{ accounts?, query?, maxResults?, markRead? }`) |
+| `POST /api/ingest` | One-shot ingest (`{ accounts?, query?, maxResults?, markRead?, seed? }`) |
 | `GET /api/health` | Health check (returns `{ status: "ok", uptime }`) |
 
 **Attachments** (for `/api/gmail/send` and `/api/slack/send`): pass an `attachments` array in the JSON body. Each attachment is `{ filename, data, contentType? }` where `data` is base64-encoded file content. Slack file uploads require the `files:write` bot/user scope.
@@ -156,6 +157,7 @@ Both `ingest` and `watch` support three output sinks:
 | `--query` | `is:unread` | Platform-native search query |
 | `--max-results` | `100` | Max messages per account per cycle |
 | `--mark-read` | `false` | Mark messages as read after ingestion |
+| `--seed` | `false` | Record IDs in state without emitting to sink (cold-start seeding) |
 | `--save-attachments` | `false` | Download attachments (dir sink only) |
 | `--state` | auto-derived | Path to state file tracking ingested message IDs |
 | `--interval-ms` | `5000` | Polling interval (watch only) |
@@ -234,6 +236,44 @@ msgmon corpus
 ```
 
 All output uses `UnifiedMessage` — a platform-agnostic envelope defined in `src/types.ts`.
+
+## Agent integration
+
+msgmon is designed as infrastructure for LLM agents that process messages. It handles auth, fetching, and sending — the agent decision-making lives outside this tool.
+
+### Cold start: seeding history
+
+On first run, `ingest` would emit every message matching the query as "new." For an agent, this is usually wrong — you want it to start processing from *now*, not re-process 30 days of history.
+
+Use `--seed` to populate the state file without emitting anything:
+
+```bash
+# Seed: absorb recent history silently
+msgmon ingest --seed --query='newer_than:30d' --max-results=500
+
+# Now run normally — only genuinely new messages come through
+msgmon watch --sink=exec --exec-cmd='./agent.sh' --mark-read
+```
+
+The seed run records all matching message IDs in the state file. Subsequent runs skip those IDs and only emit messages that arrive after the seed.
+
+### Accessing thread context
+
+When an agent receives a new message (e.g., a reply), it often needs the prior conversation for context. If using `serve`, the agent can call `POST /api/gmail/thread` with the message's `threadId` to fetch the full thread history. This is available without any extra setup — the agent just needs the thread ID from the incoming `UnifiedMessage`.
+
+### Typical serve setup
+
+Run `msgmon serve` in an isolated environment where OAuth credentials live. The agent interacts only via HTTP with a bearer token and never sees the underlying secrets:
+
+```bash
+# On the server (has credentials)
+msgmon serve --token=agent-secret --gmail-allow-to=allowed@example.com --send-rate-limit=5
+
+# The agent calls endpoints like:
+# POST /api/ingest        — poll for new messages
+# POST /api/gmail/thread  — fetch thread context
+# POST /api/gmail/send    — send a reply (subject to filtering + rate limits)
+```
 
 ## Adding a new platform
 
