@@ -107,6 +107,22 @@ export let createDirSink = (params: {
 // Exec sink — run a shell command per message with env vars
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Chain sink — runs multiple sinks in sequence per message
+// ---------------------------------------------------------------------------
+
+export let createChainSink = (sinks: Sink[]): Sink => ({
+  async write(msg) {
+    for (let sink of sinks) {
+      await sink.write(msg)
+    }
+  },
+})
+
+// ---------------------------------------------------------------------------
+// Exec sink — run a shell command per message with env vars
+// ---------------------------------------------------------------------------
+
 export let createExecSink = (params: {
   command: string
   cwd?: string

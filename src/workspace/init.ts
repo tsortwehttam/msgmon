@@ -6,6 +6,7 @@ export interface WorkspaceConfig {
   accounts: string[]
   query: string
   watchIntervalMs: number
+  onMessage?: string
   createdAt: string
 }
 
@@ -90,6 +91,35 @@ _No drafts pending review._
 _No messages processed yet._
 `
 
+let DEFAULT_ON_MESSAGE = `#!/usr/bin/env bash
+# on-message.sh — called by "msgmon workspace watch" for each new message.
+#
+# Environment variables available:
+#   MSGMON_WORKSPACE  — absolute path to the workspace root
+#   MSGMON_ID         — message ID
+#   MSGMON_PLATFORM   — gmail, slack, etc.
+#   MSGMON_TIMESTAMP  — ISO-8601 timestamp
+#   MSGMON_SUBJECT    — subject line (email) or synthesized
+#   MSGMON_FROM       — sender address
+#   MSGMON_THREAD_ID  — thread/conversation ID
+#   MSGMON_JSON       — full UnifiedMessage as JSON
+#   MSGMON_MSG_DIR    — directory where the message was saved (inbox/<dir>)
+#
+# This script is a starting point. Replace it with your agent invocation.
+# Example: pipe the message into an LLM agent that updates status.md
+
+set -euo pipefail
+
+echo "[on-message] New message from $MSGMON_FROM: $MSGMON_SUBJECT" >&2
+
+# Example: invoke your agent CLI here
+# my-agent process \\
+#   --workspace "$MSGMON_WORKSPACE" \\
+#   --message "$MSGMON_MSG_DIR/unified.json" \\
+#   --instructions "$MSGMON_WORKSPACE/instructions.md" \\
+#   --status "$MSGMON_WORKSPACE/status.md"
+`
+
 export let initWorkspace = (targetDir: string, options: { name?: string; accounts?: string[]; query?: string } = {}) => {
   let resolved = path.resolve(targetDir)
 
@@ -111,6 +141,7 @@ export let initWorkspace = (targetDir: string, options: { name?: string; account
     accounts: options.accounts ?? ["default"],
     query: options.query ?? "is:unread",
     watchIntervalMs: 5000,
+    onMessage: "./on-message.sh",
     createdAt: new Date().toISOString(),
   }
 
@@ -118,6 +149,10 @@ export let initWorkspace = (targetDir: string, options: { name?: string; account
   fs.writeFileSync(path.join(resolved, "instructions.md"), DEFAULT_INSTRUCTIONS)
   fs.writeFileSync(path.join(resolved, "user-profile.md"), DEFAULT_USER_PROFILE)
   fs.writeFileSync(path.join(resolved, "status.md"), DEFAULT_STATUS)
+
+  let hookPath = path.join(resolved, "on-message.sh")
+  fs.writeFileSync(hookPath, DEFAULT_ON_MESSAGE)
+  fs.chmodSync(hookPath, 0o755)
 
   return { path: resolved, config }
 }
