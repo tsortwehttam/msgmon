@@ -12,10 +12,11 @@ import { parseServeCli } from "../src/serve/cli"
 import { parseDraftCli } from "../src/draft/cli"
 import { parseWorkspaceCli } from "../src/workspace/cli"
 import { parseSessionCli, parseSyncCli } from "../src/session/cli"
+import { parseSetupCli } from "../src/setup/cli"
 import { verboseLog } from "../src/Verbose"
 
 let args = hideBin(process.argv)
-let subcommands = new Set(["gmail", "slack", "teams", "whatsapp", "ingest", "watch", "corpus", "serve", "draft", "workspace", "sync", "session", "help"])
+let subcommands = new Set(["gmail", "slack", "teams", "whatsapp", "ingest", "watch", "corpus", "serve", "draft", "workspace", "sync", "session", "setup", "help"])
 let verbose = args.includes("--verbose") || args.includes("-v")
 let commandIndex = args.findIndex(x => !x.startsWith("-"))
 let command = commandIndex >= 0 ? args[commandIndex] : undefined
@@ -26,7 +27,7 @@ let helpBuilder = (y: import("yargs").Argv) =>
   y
     .positional("platform", {
       type: "string",
-      choices: ["gmail", "slack", "teams", "whatsapp", "ingest", "watch", "corpus", "serve", "draft", "workspace", "sync", "session"] as const,
+      choices: ["gmail", "slack", "teams", "whatsapp", "ingest", "watch", "corpus", "serve", "draft", "workspace", "sync", "session", "setup"] as const,
       describe: "Platform or command to show help for",
     })
     .positional("command", {
@@ -47,6 +48,7 @@ let cli = yargs(args)
   .command("ingest", "One-shot: ingest new messages across accounts, emit to sink, then exit (cron-friendly)")
   .command("watch", "Daemon: continuously ingest new messages across accounts, emit to sink as they arrive")
   .command("corpus", "Build LLM-oriented corpus (messages.jsonl, chunks.jsonl, threads.jsonl) from ingested messages")
+  .command("setup", "Interactive guided setup: credentials, auth, workspace, and seed in one flow")
   .command("serve", "HTTP API server: secret-holding control plane with policy-gated workspace sync")
   .command("draft", "Compose, list, send, edit, and delete message drafts")
   .command("workspace", "Create and refresh server-managed agent workspaces")
@@ -99,6 +101,7 @@ let cli = yargs(args)
       "  ingest    — One-shot multi-account ingest. Cron-friendly. Emits UnifiedMessage.",
       "  watch     — Continuous multi-account daemon. Emits UnifiedMessage as they arrive.",
       "  corpus    — Build LLM corpus from ingested message directories.",
+      "  setup     — Interactive guided setup: credentials, auth, workspace, and seed.",
       "  serve     — Secret-holding HTTP control plane with policy-gated workspace sync.",
       "  draft     — Compose, list, send, edit, and delete message drafts.",
       "  workspace — Create and refresh server-managed agent workspaces.",
@@ -298,6 +301,17 @@ else if (!dispatched && command === "sync") {
 }
 
 // ---------------------------------------------------------------------------
+// Setup — interactive guided setup
+// ---------------------------------------------------------------------------
+
+else if (!dispatched && command === "setup") {
+  parseSetupCli([...forwardedVerboseArgs, ...commandArgs], "msgmon setup").catch(e => {
+    console.error(e?.message ?? e)
+    process.exit(1)
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Session — bootstrap and supervise local agent sessions
 // ---------------------------------------------------------------------------
 
@@ -342,6 +356,8 @@ else if (!dispatched && command === "help") {
     parseSyncCli([...forwardedVerboseArgs, "--help"], "msgmon sync")
   } else if (subhelp === "session") {
     parseSessionCli([...forwardedVerboseArgs, "--help"], "msgmon session")
+  } else if (subhelp === "setup") {
+    parseSetupCli([...forwardedVerboseArgs, "--help"], "msgmon setup")
   } else {
     cli.parseAsync().catch(e => {
       console.error(e?.message ?? e)
