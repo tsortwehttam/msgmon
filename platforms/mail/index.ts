@@ -5,5 +5,5 @@
 export { parseMailCli, configureMailCli } from "./mail"
 export { parseAuthCli, configureAuthCli } from "./auth"
 export { parseAccountsCli, configureAccountsCli } from "./accounts"
-export { parsePollCli, configurePollCli } from "./poll"
-export { parseMonitorCli, configureMonitorCli } from "./monitor"
+export { toUnifiedMessage } from "./toUnifiedMessage"
+export { mailSource, markMailRead, fetchMailAttachment } from "./MailSource"

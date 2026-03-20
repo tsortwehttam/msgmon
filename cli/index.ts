@@ -3,15 +3,14 @@ import { hideBin } from "yargs/helpers"
 import { parseAccountsCli } from "../platforms/mail/accounts"
 import { parseAuthCli } from "../platforms/mail/auth"
 import { parseMailCli } from "../platforms/mail/mail"
-import { parseMonitorCli } from "../platforms/mail/monitor"
-import { parsePollCli } from "../platforms/mail/poll"
+import { parseIngestCli, parseWatchCli } from "../src/ingest/cli"
 import { parseSlackCli } from "../platforms/slack"
 import { parseTeamsCli } from "../platforms/teams"
 import { parseWhatsAppCli } from "../platforms/whatsapp"
 import { verboseLog } from "../src/Verbose"
 
 let args = hideBin(process.argv)
-let subcommands = new Set(["mail", "slack", "teams", "whatsapp", "help"])
+let subcommands = new Set(["mail", "slack", "teams", "whatsapp", "ingest", "watch", "help"])
 let verbose = args.includes("--verbose") || args.includes("-v")
 let commandIndex = args.findIndex(x => !x.startsWith("-"))
 let command = commandIndex >= 0 ? args[commandIndex] : undefined
@@ -21,17 +20,19 @@ let dispatched = false
 
 let cli = yargs(args)
   .scriptName("messagemon")
-  .usage("Usage: $0 <platform> <command> [options]")
+  .usage("Usage: $0 <command> [options]")
   .option("verbose", {
     alias: "v",
     type: "boolean",
     default: false,
     describe: "Print diagnostic details to stderr",
   })
-  .command("mail", "Gmail: search, read, send, export, monitor email messages")
-  .command("slack", "Slack: search, read, send, poll, monitor Slack messages")
-  .command("teams", "Teams: search, read, send, poll, monitor Microsoft Teams messages")
-  .command("whatsapp", "WhatsApp: read, send, poll, monitor WhatsApp messages")
+  .command("mail", "Gmail: search, read, send, export, corpus, thread, count, mark-read, archive")
+  .command("ingest", "One-shot: ingest new messages across accounts, emit to sink, then exit (cron-friendly)")
+  .command("watch", "Daemon: continuously ingest new messages across accounts, emit to sink as they arrive")
+  .command("slack", "Slack: search, read, send messages (planned)")
+  .command("teams", "Teams: search, read, send messages (planned)")
+  .command("whatsapp", "WhatsApp: read, send messages (planned)")
   .command(
     "help [platform] [command]",
     "Show main help or help for a specific platform/command",
@@ -39,8 +40,8 @@ let cli = yargs(args)
       y
         .positional("platform", {
           type: "string",
-          choices: ["mail", "slack", "teams", "whatsapp"] as const,
-          describe: "Platform to show help for",
+          choices: ["mail", "slack", "teams", "whatsapp", "ingest", "watch"] as const,
+          describe: "Platform or command to show help for",
         })
         .positional("command", {
           type: "string",
@@ -53,6 +54,8 @@ let cli = yargs(args)
       }
       let helpArgs = argv.command ? [argv.command, "--help"] : ["--help"]
       if (argv.platform === "mail") return parseMailCli(helpArgs, "messagemon mail")
+      if (argv.platform === "ingest") return parseIngestCli(helpArgs, "messagemon ingest")
+      if (argv.platform === "watch") return parseWatchCli(helpArgs, "messagemon watch")
       if (argv.platform === "slack") return parseSlackCli(helpArgs, "messagemon slack")
       if (argv.platform === "teams") return parseTeamsCli(helpArgs, "messagemon teams")
       if (argv.platform === "whatsapp") return parseWhatsAppCli(helpArgs, "messagemon whatsapp")
@@ -63,20 +66,30 @@ let cli = yargs(args)
   .example("$0 mail search \"from:someone newer_than:7d\"", "Search Gmail messages")
   .example("$0 mail send --to you@example.com --subject \"Hi\" --body \"Hello\" --yes", "Send an email")
   .example("$0 mail auth --account=personal", "Authorize a Gmail account")
-  .example("$0 mail monitor --query='in:inbox is:unread' --agent-cmd='...'", "Monitor Gmail and run agents")
-  .example("$0 slack search \"project update\"", "Search Slack messages (planned)")
-  .example("$0 teams search \"quarterly review\"", "Search Teams messages (planned)")
-  .example("$0 whatsapp send --to +1234567890 --body \"Hello\"", "Send a WhatsApp message (planned)")
+  .example("$0 ingest --account=work --account=personal --sink=dir --out-dir=./inbox", "One-shot ingest to disk")
+  .example("$0 ingest --sink=ndjson > today.jsonl", "Dump new messages as NDJSON")
+  .example("$0 watch --account=work --sink=ndjson | my-router", "Stream messages to another process")
+  .example("$0 watch --sink=dir --out-dir=/data/inbox --save-attachments", "Daemon: save to disk as messages arrive")
+  .example("$0 watch --sink=exec --exec-cmd='./agent.sh' --mark-read", "Run agent per message")
   .epilog(
     [
-      "Platforms:",
-      "  mail      — Gmail via Google APIs (fully implemented)",
-      "  slack     — Slack via @slack/web-api (planned)",
-      "  teams     — Microsoft Teams via Graph API (planned)",
-      "  whatsapp  — WhatsApp via Cloud API (planned)",
+      "Commands:",
+      "  mail      — Gmail operations: search, read, send, export, corpus, etc.",
+      "  ingest    — One-shot multi-account ingest. Cron-friendly. Emits UnifiedMessage.",
+      "  watch     — Continuous multi-account daemon. Emits UnifiedMessage as they arrive.",
+      "",
+      "Platforms (planned):",
+      "  slack     — Slack via @slack/web-api",
+      "  teams     — Microsoft Teams via Graph API",
+      "  whatsapp  — WhatsApp via Cloud API",
+      "",
+      "Sinks (for ingest/watch):",
+      "  ndjson    — One JSON line per message to stdout (pipe-friendly)",
+      "  dir       — Scannable directory per message (unified.json, body.txt, attachments/)",
+      "  exec      — Run a shell command per message with MESSAGEMON_* env vars",
       "",
       "Each platform stores credentials and tokens under .messagemon/<platform>/.",
-      "Use `messagemon <platform> auth` to set up credentials for a platform.",
+      "Use `messagemon mail auth` to set up Gmail credentials.",
       "Use `--verbose` at any level for stderr diagnostics.",
     ].join("\n"),
   )
@@ -125,9 +138,6 @@ if (!dispatched && (args[0] === "--help" || args[0] === "-h")) {
 // ---------------------------------------------------------------------------
 
 if (!dispatched && command === "mail") {
-  // The first arg after "mail" may be a mail subcommand or a mail-level flag.
-  // Legacy top-level commands (auth, accounts, poll, monitor) are now nested
-  // under "mail" as well.
   let mailSubcommand = commandArgs.find(x => !x.startsWith("-"))
 
   if (mailSubcommand === "auth") {
@@ -142,24 +152,34 @@ if (!dispatched && command === "mail") {
       console.error(e?.message ?? e)
       process.exit(1)
     })
-  } else if (mailSubcommand === "poll") {
-    let pollArgs = commandArgs.filter(x => x !== "poll")
-    parsePollCli([...forwardedVerboseArgs, ...pollArgs], "messagemon mail poll").catch(e => {
-      console.error(e?.message ?? e)
-      process.exit(1)
-    })
-  } else if (mailSubcommand === "monitor") {
-    let monitorArgs = commandArgs.filter(x => x !== "monitor")
-    parseMonitorCli([...forwardedVerboseArgs, ...monitorArgs], "messagemon mail monitor").catch(e => {
-      console.error(e?.message ?? e)
-      process.exit(1)
-    })
   } else {
     parseMailCli([...forwardedVerboseArgs, ...commandArgs], "messagemon mail").catch(e => {
       console.error(e?.message ?? e)
       process.exit(1)
     })
   }
+}
+
+// ---------------------------------------------------------------------------
+// Ingest — one-shot multi-account ingest
+// ---------------------------------------------------------------------------
+
+else if (!dispatched && command === "ingest") {
+  parseIngestCli([...forwardedVerboseArgs, ...commandArgs], "messagemon ingest").catch(e => {
+    console.error(e?.message ?? e)
+    process.exit(1)
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Watch — continuous multi-account daemon
+// ---------------------------------------------------------------------------
+
+else if (!dispatched && command === "watch") {
+  parseWatchCli([...forwardedVerboseArgs, ...commandArgs], "messagemon watch").catch(e => {
+    console.error(e?.message ?? e)
+    process.exit(1)
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -207,6 +227,10 @@ else if (!dispatched && command === "help") {
   let subhelp = commandArgs[0]
   if (subhelp === "mail") {
     parseMailCli([...forwardedVerboseArgs, "--help"], "messagemon mail")
+  } else if (subhelp === "ingest") {
+    parseIngestCli([...forwardedVerboseArgs, "--help"], "messagemon ingest")
+  } else if (subhelp === "watch") {
+    parseWatchCli([...forwardedVerboseArgs, "--help"], "messagemon watch")
   } else if (subhelp === "slack") {
     parseSlackCli([...forwardedVerboseArgs, "--help"], "messagemon slack")
   } else if (subhelp === "teams") {

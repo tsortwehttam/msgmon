@@ -105,7 +105,8 @@ let listMessageDirs = (rootDir: string) => {
   while (stack.length > 0) {
     let current = stack.pop() as string
     let entries = fs.readdirSync(current, { withFileTypes: true })
-    if (entries.some(entry => entry.isFile() && entry.name === "message.json")) {
+    // Accept directories containing either unified.json (new ingest format) or message.json (legacy export)
+    if (entries.some(entry => entry.isFile() && (entry.name === "unified.json" || entry.name === "message.json"))) {
       out.push(current)
       continue
     }
@@ -238,23 +239,50 @@ export let buildCorpus = (params: {
   let totalChunks = 0
 
   for (let messageDir of messageDirs) {
+    let unifiedJsonPath = path.resolve(messageDir, "unified.json")
     let messageJsonPath = path.resolve(messageDir, "message.json")
     let headersPath = path.resolve(messageDir, "headers.json")
     let bodyTextPath = path.resolve(messageDir, "body.txt")
     let bodyHtmlPath = path.resolve(messageDir, "body.html")
     let attachmentsDir = path.resolve(messageDir, "attachments")
 
-    let message = JSON.parse(fs.readFileSync(messageJsonPath, "utf8"))
-    let headers = fs.existsSync(headersPath) ? JSON.parse(fs.readFileSync(headersPath, "utf8")) : {}
-    let messageId = String(message.id ?? path.basename(messageDir))
-    let threadId = String(message.threadId ?? messageId)
-    let subject = String(headers.subject ?? "")
-    let from = String(headers.from ?? "")
-    let to = String(headers.to ?? "")
-    let cc = String(headers.cc ?? "")
-    let bcc = String(headers.bcc ?? "")
-    let date = String(headers.date ?? "")
-    let internalDate = message.internalDate ? new Date(Number(message.internalDate)).toISOString() : date
+    let messageId: string
+    let threadId: string
+    let subject: string
+    let from: string
+    let to: string
+    let cc: string
+    let bcc: string
+    let date: string
+    let internalDate: string
+
+    if (fs.existsSync(unifiedJsonPath)) {
+      // New unified format from ingest --sink=dir
+      let unified = JSON.parse(fs.readFileSync(unifiedJsonPath, "utf8"))
+      messageId = String(unified.id ?? path.basename(messageDir))
+      threadId = String(unified.threadId ?? messageId)
+      subject = String(unified.subject ?? "")
+      from = unified.from ? (unified.from.name ? `${unified.from.name} <${unified.from.address}>` : unified.from.address) : ""
+      to = (unified.to ?? []).map((p: { name?: string; address: string }) => p.name ? `${p.name} <${p.address}>` : p.address).join(", ")
+      cc = (unified.cc ?? []).map((p: { name?: string; address: string }) => p.name ? `${p.name} <${p.address}>` : p.address).join(", ")
+      bcc = (unified.bcc ?? []).map((p: { name?: string; address: string }) => p.name ? `${p.name} <${p.address}>` : p.address).join(", ")
+      date = String(unified.timestamp ?? "")
+      internalDate = date
+    } else {
+      // Legacy format from mail export
+      let message = JSON.parse(fs.readFileSync(messageJsonPath, "utf8"))
+      let headers = fs.existsSync(headersPath) ? JSON.parse(fs.readFileSync(headersPath, "utf8")) : {}
+      messageId = String(message.id ?? path.basename(messageDir))
+      threadId = String(message.threadId ?? messageId)
+      subject = String(headers.subject ?? "")
+      from = String(headers.from ?? "")
+      to = String(headers.to ?? "")
+      cc = String(headers.cc ?? "")
+      bcc = String(headers.bcc ?? "")
+      date = String(headers.date ?? "")
+      internalDate = message.internalDate ? new Date(Number(message.internalDate)).toISOString() : date
+    }
+
     let bodyText = normalizeWhitespace(readUtf8IfExists(bodyTextPath) ?? stripHtml(readUtf8IfExists(bodyHtmlPath) ?? ""))
     let participants = parseEmailAddresses(from, to, cc, bcc)
 
