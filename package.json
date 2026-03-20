@@ -6,6 +6,9 @@
     "messagemon": "bin/messagemon.mjs"
   },
   "license": "MIT",
+  "scripts": {
+    "test": "tsx --test test/*.test.ts"
+  },
   "dependencies": {
     "@google-cloud/local-auth": "^3.0.1",
     "googleapis": "^171.4.0",
