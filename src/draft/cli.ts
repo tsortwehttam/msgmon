@@ -39,6 +39,11 @@ export let configureDraftCli = (cli: Argv) =>
             demandOption: true,
             describe: "Target platform",
           })
+          .option("workspace", {
+            type: "string",
+            demandOption: true,
+            describe: "Workspace id owning this draft",
+          })
           .option("account", {
             type: "string",
             default: DEFAULT_ACCOUNT,
@@ -132,8 +137,8 @@ export let configureDraftCli = (cli: Argv) =>
           }
         }
 
-        let filePath = saveDraft(draft)
-        console.log(JSON.stringify({ id: draft.id, platform: draft.platform, path: filePath }))
+        let filePath = saveDraft(argv.workspace, draft)
+        console.log(JSON.stringify({ workspaceId: argv.workspace, id: draft.id, platform: draft.platform, path: filePath }))
       },
     )
     .command(
@@ -147,13 +152,18 @@ export let configureDraftCli = (cli: Argv) =>
             default: "json",
             describe: "Output format",
           })
+          .option("workspace", {
+            type: "string",
+            demandOption: true,
+            describe: "Workspace id",
+          })
           .option("platform", {
             type: "string",
             choices: ["gmail", "slack"] as const,
             describe: "Filter by platform",
           }),
       async argv => {
-        let drafts = listDrafts(argv.platform)
+        let drafts = listDrafts(argv.workspace, argv.platform)
         if (argv.format === "text") {
           if (drafts.length === 0) {
             console.log("No drafts.")
@@ -174,9 +184,11 @@ export let configureDraftCli = (cli: Argv) =>
     .command(
       "show <id>",
       "Show a draft by ID (prefix match)",
-      y => y.positional("id", { type: "string", demandOption: true, describe: "Draft ID or prefix" }),
+      y => y
+        .positional("id", { type: "string", demandOption: true, describe: "Draft ID or prefix" })
+        .option("workspace", { type: "string", demandOption: true, describe: "Workspace id" }),
       async argv => {
-        let draft = resolveDraft(argv.id!)
+        let draft = resolveDraft(argv.workspace, argv.id!)
         console.log(JSON.stringify(draft, null, 2))
       },
     )
@@ -186,6 +198,7 @@ export let configureDraftCli = (cli: Argv) =>
       y =>
         y
           .positional("id", { type: "string", demandOption: true, describe: "Draft ID or prefix" })
+          .option("workspace", { type: "string", demandOption: true, describe: "Workspace id" })
           .option("label", { type: "string", describe: "Label or note" })
           .option("to", { type: "string", describe: "Recipient (gmail)" })
           .option("cc", { type: "array", string: true, coerce: normalizeMultiValue, describe: "CC (gmail)" })
@@ -206,7 +219,7 @@ export let configureDraftCli = (cli: Argv) =>
             describe: "Replace attachments with these file paths",
           }),
       async argv => {
-        let draft = resolveDraft(argv.id!)
+        let draft = resolveDraft(argv.workspace, argv.id!)
 
         if (argv.label !== undefined) draft.label = argv.label
         if (argv.attach) draft.attachments = readAttachments(argv.attach)
@@ -229,7 +242,7 @@ export let configureDraftCli = (cli: Argv) =>
         }
 
         draft.updatedAt = new Date().toISOString()
-        saveDraft(draft)
+        saveDraft(argv.workspace, draft)
         console.log(JSON.stringify(draft, null, 2))
       },
     )
@@ -239,6 +252,7 @@ export let configureDraftCli = (cli: Argv) =>
       y =>
         y
           .positional("id", { type: "string", demandOption: true, describe: "Draft ID or prefix" })
+          .option("workspace", { type: "string", demandOption: true, describe: "Workspace id" })
           .option("yes", {
             type: "boolean",
             default: false,
@@ -251,20 +265,22 @@ export let configureDraftCli = (cli: Argv) =>
           }),
       async argv => {
         if (!argv.yes) throw new Error("Refusing to send without --yes")
-        let draft = resolveDraft(argv.id!)
+        let draft = resolveDraft(argv.workspace, argv.id!)
         let result = await sendDraft(draft)
-        if (!argv.keep) deleteDraft(draft.id)
-        console.log(JSON.stringify({ sent: true, draftId: draft.id, deleted: !argv.keep, result }))
+        if (!argv.keep) deleteDraft(argv.workspace, draft.id)
+        console.log(JSON.stringify({ workspaceId: argv.workspace, sent: true, draftId: draft.id, deleted: !argv.keep, result }))
       },
     )
     .command(
       "delete <id>",
       "Delete a draft",
-      y => y.positional("id", { type: "string", demandOption: true, describe: "Draft ID or prefix" }),
+      y => y
+        .positional("id", { type: "string", demandOption: true, describe: "Draft ID or prefix" })
+        .option("workspace", { type: "string", demandOption: true, describe: "Workspace id" }),
       async argv => {
-        let draft = resolveDraft(argv.id!)
-        deleteDraft(draft.id)
-        console.log(JSON.stringify({ deleted: true, id: draft.id }))
+        let draft = resolveDraft(argv.workspace, argv.id!)
+        deleteDraft(argv.workspace, draft.id)
+        console.log(JSON.stringify({ workspaceId: argv.workspace, deleted: true, id: draft.id }))
       },
     )
     .demandCommand(1, "Choose a command: compose, list, show, edit, send, or delete.")
@@ -272,14 +288,14 @@ export let configureDraftCli = (cli: Argv) =>
     .help()
 
 /** Resolve a draft by full ID or prefix match */
-let resolveDraft = (idOrPrefix: string): Draft => {
+let resolveDraft = (workspaceId: string, idOrPrefix: string): Draft => {
   // Try exact match first
   try {
-    return loadDraft(idOrPrefix)
+    return loadDraft(workspaceId, idOrPrefix)
   } catch { /* continue to prefix match */ }
 
   // Prefix match
-  let all = listDrafts()
+  let all = listDrafts(workspaceId)
   let matches = all.filter(d => d.id.startsWith(idOrPrefix))
   if (matches.length === 0) throw new Error(`No draft matching "${idOrPrefix}"`)
   if (matches.length > 1) throw new Error(`Ambiguous prefix "${idOrPrefix}" matches ${matches.length} drafts`)

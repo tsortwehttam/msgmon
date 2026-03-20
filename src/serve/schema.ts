@@ -121,6 +121,11 @@ export let WorkspaceIdParam = z.object({
 })
 export type WorkspaceIdParam = z.infer<typeof WorkspaceIdParam>
 
+export let WorkspaceExportRequest = WorkspaceIdParam.extend({
+  format: z.enum(["snapshot", "bundle"]).default("snapshot"),
+})
+export type WorkspaceExportRequest = z.infer<typeof WorkspaceExportRequest>
+
 export let WorkspaceRefreshRequest = WorkspaceIdParam.extend({
   maxResults: z.number().int().min(1).default(100),
   markRead: z.boolean().default(false),
@@ -128,6 +133,21 @@ export let WorkspaceRefreshRequest = WorkspaceIdParam.extend({
   seed: z.boolean().default(false),
 })
 export type WorkspaceRefreshRequest = z.infer<typeof WorkspaceRefreshRequest>
+
+export let WorkspaceBootstrapRequest = WorkspaceIdParam.extend({
+  name: z.string().optional(),
+  accounts: z.array(z.string()).min(1).default(["default"]),
+  query: z.string().default("is:unread"),
+  overwrite: z.boolean().default(false),
+})
+export type WorkspaceBootstrapRequest = z.infer<typeof WorkspaceBootstrapRequest>
+
+export let WorkspaceImportRequest = z.object({
+  workspaceId: z.string().min(1).optional(),
+  bundleBase64: z.string().min(1, "bundleBase64 is required"),
+  overwrite: z.boolean().default(false),
+})
+export type WorkspaceImportRequest = z.infer<typeof WorkspaceImportRequest>
 
 export let WorkspacePushFile = z.object({
   path: z.string().min(1, "path is required"),
@@ -193,6 +213,7 @@ export type WorkspaceActionRequest = z.infer<typeof WorkspaceActionRequest>
 // ---------------------------------------------------------------------------
 
 export let DraftComposeGmailRequest = z.object({
+  workspaceId: z.string().min(1, "workspaceId is required"),
   platform: z.literal("gmail"),
   account: z.string().default("default"),
   label: z.string().optional(),
@@ -211,6 +232,7 @@ export let DraftComposeGmailRequest = z.object({
 })
 
 export let DraftComposeSlackRequest = z.object({
+  workspaceId: z.string().min(1, "workspaceId is required"),
   platform: z.literal("slack"),
   account: z.string().default("default"),
   label: z.string().optional(),
@@ -228,19 +250,23 @@ export let DraftComposeRequest = z.discriminatedUnion("platform", [
 export type DraftComposeRequest = z.infer<typeof DraftComposeRequest>
 
 export let DraftIdParam = z.object({
+  workspaceId: z.string().min(1, "workspaceId is required"),
   id: z.string().min(1, "id is required"),
 })
 
 export let DraftListRequest = z.object({
+  workspaceId: z.string().min(1, "workspaceId is required"),
   platform: z.enum(["gmail", "slack"]).optional(),
 })
 
 export let DraftSendRequest = z.object({
+  workspaceId: z.string().min(1, "workspaceId is required"),
   id: z.string().min(1, "id is required"),
   keep: z.boolean().default(false),
 })
 
 export let DraftUpdateRequest = z.object({
+  workspaceId: z.string().min(1, "workspaceId is required"),
   id: z.string().min(1, "id is required"),
   label: z.string().optional(),
   to: z.string().optional(),

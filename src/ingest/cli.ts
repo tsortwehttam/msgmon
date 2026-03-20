@@ -141,7 +141,6 @@ export let configureIngestCli = (cli: Argv) =>
   cli
     .usage("Usage: $0 [options]")
     .wrap(null)
-    .middleware(argv => sharedOptions(argv as unknown as Argv))
     .command(
       "$0",
       false as unknown as string,
@@ -224,7 +223,6 @@ export let configureWatchCli = (cli: Argv) =>
   cli
     .usage("Usage: $0 [options]")
     .wrap(null)
-    .middleware(argv => sharedOptions(argv as unknown as Argv))
     .command(
       "$0",
       false as unknown as string,

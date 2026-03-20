@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import crypto from "node:crypto"
+import zlib from "node:zlib"
 import { z } from "zod"
 import { PWD_CONFIG_DIR } from "../CliConfig"
 import { Draft } from "../draft/schema"
@@ -24,6 +25,14 @@ export type WorkspacePushFile = {
   path: string
   contentBase64?: string
   deleted?: boolean
+}
+
+export type WorkspaceBundle = {
+  format: "msgmon.workspace.bundle.v1"
+  workspaceId: string
+  revision: string
+  config: WorkspaceConfig
+  files: WorkspaceExportFile[]
 }
 
 let WORKSPACE_DIRS = ["inbox", "drafts", "corpus"] as const
@@ -175,6 +184,10 @@ let readFilesRecursive = (root: string, dir = root): WorkspaceExportFile[] => {
   return files
 }
 
+let removePathIfExists = (target: string) => {
+  if (fs.existsSync(target)) fs.rmSync(target, { recursive: true, force: true })
+}
+
 let computeRevision = (files: WorkspaceExportFile[]) => {
   let hash = crypto.createHash("sha256")
   for (let file of files.sort((a, b) => a.path.localeCompare(b.path))) {
@@ -190,16 +203,17 @@ let computeRevision = (files: WorkspaceExportFile[]) => {
 
 export let initWorkspace = (
   workspaceId: string,
-  options: { name?: string; accounts?: string[]; query?: string } = {},
+  options: { name?: string; accounts?: string[]; query?: string; overwrite?: boolean } = {},
 ) => {
   let id = ensureSafeWorkspaceId(workspaceId)
   let root = workspaceRoot(id)
 
   if (fs.existsSync(root)) {
     let entries = fs.readdirSync(root)
-    if (entries.length > 0) {
+    if (entries.length > 0 && !options.overwrite) {
       throw new Error(`Workspace "${id}" already exists and is not empty`)
     }
+    if (entries.length > 0 && options.overwrite) removePathIfExists(root)
   }
 
   fs.mkdirSync(root, { recursive: true })
@@ -262,6 +276,74 @@ export let exportWorkspaceSnapshot = (workspaceId: string) => {
   }
 }
 
+export let exportWorkspaceBundle = (workspaceId: string) => {
+  let snapshot = exportWorkspaceSnapshot(workspaceId)
+  let bundle: WorkspaceBundle = {
+    format: "msgmon.workspace.bundle.v1",
+    workspaceId: snapshot.workspaceId,
+    revision: snapshot.revision,
+    config: snapshot.config,
+    files: snapshot.files,
+  }
+  let json = JSON.stringify(bundle)
+  let gzip = zlib.gzipSync(Buffer.from(json, "utf8"))
+  return {
+    workspaceId: snapshot.workspaceId,
+    revision: snapshot.revision,
+    encoding: "base64" as const,
+    compression: "gzip" as const,
+    mediaType: "application/vnd.msgmon.workspace-bundle+json",
+    bundleBase64: gzip.toString("base64"),
+  }
+}
+
+let writeSnapshotFiles = (workspaceId: string, files: WorkspaceExportFile[]) => {
+  for (let file of files) {
+    let target = normalizeWorkspacePath(workspaceId, file.path)
+    if (!isExportablePath(target.normalized)) continue
+    fs.mkdirSync(path.dirname(target.resolved), { recursive: true })
+    fs.writeFileSync(target.resolved, Buffer.from(file.contentBase64, "base64"))
+    fs.chmodSync(target.resolved, file.mode)
+  }
+}
+
+export let importWorkspaceBundle = (params: {
+  workspaceId?: string
+  bundleBase64: string
+  overwrite?: boolean
+}) => {
+  let raw = zlib.gunzipSync(Buffer.from(params.bundleBase64, "base64")).toString("utf8")
+  let bundle = JSON.parse(raw) as WorkspaceBundle
+  if (bundle.format !== "msgmon.workspace.bundle.v1") {
+    throw new Error(`Unsupported workspace bundle format "${(bundle as { format?: string }).format ?? "unknown"}"`)
+  }
+
+  let workspaceId = ensureSafeWorkspaceId(params.workspaceId ?? bundle.workspaceId)
+  let root = workspaceRoot(workspaceId)
+  if (fs.existsSync(root) && !params.overwrite) {
+    let entries = fs.readdirSync(root)
+    if (entries.length > 0) throw new Error(`Workspace "${workspaceId}" already exists and is not empty`)
+  }
+
+  initWorkspace(workspaceId, {
+    name: bundle.config.name,
+    accounts: bundle.config.accounts,
+    query: bundle.config.query,
+    overwrite: params.overwrite,
+  })
+  writeSnapshotFiles(workspaceId, bundle.files)
+  let config = saveWorkspaceConfig({
+    ...bundle.config,
+    id: workspaceId,
+    createdAt: bundle.config.createdAt,
+    updatedAt: bundle.config.updatedAt,
+  })
+  return {
+    ...exportWorkspaceSnapshot(workspaceId),
+    config,
+  }
+}
+
 export let applyWorkspacePush = (
   workspaceId: string,
   params: { baseRevision: string; files: WorkspacePushFile[] },
@@ -300,18 +382,6 @@ export let applyWorkspacePush = (
     ...exportWorkspaceSnapshot(workspaceId),
     config: nextConfig,
   }
-}
-
-export let loadWorkspaceDraft = (workspaceId: string, draftId: string) => {
-  let filePath = path.resolve(workspaceDraftsRoot(workspaceId), `${draftId}.json`)
-  if (!fs.existsSync(filePath)) throw new Error(`Draft "${draftId}" not found in workspace "${workspaceId}"`)
-  return Draft.parse(JSON.parse(fs.readFileSync(filePath, "utf8")))
-}
-
-export let deleteWorkspaceDraft = (workspaceId: string, draftId: string) => {
-  let filePath = path.resolve(workspaceDraftsRoot(workspaceId), `${draftId}.json`)
-  if (!fs.existsSync(filePath)) throw new Error(`Draft "${draftId}" not found in workspace "${workspaceId}"`)
-  fs.unlinkSync(filePath)
 }
 
 export let writeWorkspaceMessage = (workspaceId: string, msgDirName: string, files: Record<string, string | Buffer>) => {

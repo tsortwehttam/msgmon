@@ -1,20 +1,6 @@
 import http from "node:http"
 import path from "node:path"
 import { z } from "zod"
-import { google } from "googleapis"
-import { gmailClient } from "../../platforms/gmail/MailSource"
-import { toUnifiedMessage } from "../../platforms/gmail/toUnifiedMessage"
-import { headerMap, pickBody } from "../../platforms/gmail/MessageExport"
-import { base64url, buildRawMessage } from "../../platforms/gmail/mail"
-import { listAccounts as listGmailAccounts } from "../../platforms/gmail/accounts"
-import { slackClients, uploadFilesToChannel } from "../../platforms/slack/slackClient"
-import { toUnifiedMessage as slackToUnifiedMessage } from "../../platforms/slack/toUnifiedMessage"
-import type { SlackMessage, UserCache } from "../../platforms/slack/toUnifiedMessage"
-import { listSlackAccounts } from "../../platforms/slack/accounts"
-import { ingestOnce, buildDefaultStatePath } from "../ingest/ingest"
-import { createNdjsonSink } from "../ingest/sinks"
-import { gmailSource, markGmailRead } from "../../platforms/gmail/MailSource"
-import { slackSource, markSlackRead } from "../../platforms/slack/SlackSource"
 import { verboseLog } from "../Verbose"
 import type { MessageSource } from "../ingest/ingest"
 import type { UnifiedMessage } from "../types"
@@ -37,7 +23,6 @@ import {
   type ApiResponse,
 } from "./schema"
 import { generateDraftId, saveDraft, loadDraft, listDrafts, deleteDraft } from "../draft/store"
-import { sendDraft } from "../draft/send"
 import type { Draft } from "../draft/schema"
 import { createWorkspaceHandlers } from "../workspace/api"
 
@@ -115,6 +100,10 @@ let handleGmailSearch = async (body: unknown) => {
   let v = validate(GmailSearchRequest, body)
   if (!v.success) return { status: 400, error: v.error }
   let p = v.data
+  let [{ gmailClient }, { headerMap, pickBody }] = await Promise.all([
+    import("../../platforms/gmail/MailSource"),
+    import("../../platforms/gmail/MessageExport"),
+  ])
 
   let client = gmailClient(p.account)
   let effectiveFetch = p.fetch
@@ -172,6 +161,7 @@ let handleGmailCount = async (body: unknown) => {
   let v = validate(GmailCountRequest, body)
   if (!v.success) return { status: 400, error: v.error }
   let p = v.data
+  let { gmailClient } = await import("../../platforms/gmail/MailSource")
 
   let client = gmailClient(p.account)
   let r = await client.users.messages.list({ userId: "me", q: p.query, maxResults: 1 })
@@ -189,6 +179,10 @@ let handleGmailThread = async (body: unknown) => {
   let v = validate(GmailThreadRequest, body)
   if (!v.success) return { status: 400, error: v.error }
   let p = v.data
+  let [{ gmailClient }, { toUnifiedMessage }] = await Promise.all([
+    import("../../platforms/gmail/MailSource"),
+    import("../../platforms/gmail/toUnifiedMessage"),
+  ])
 
   let client = gmailClient(p.account)
   let r = await client.users.threads.get({ userId: "me", id: p.threadId, format: "full" })
@@ -203,6 +197,10 @@ let handleGmailRead = async (body: unknown) => {
   let v = validate(GmailReadRequest, body)
   if (!v.success) return { status: 400, error: v.error }
   let p = v.data
+  let [{ gmailClient }, { toUnifiedMessage }] = await Promise.all([
+    import("../../platforms/gmail/MailSource"),
+    import("../../platforms/gmail/toUnifiedMessage"),
+  ])
 
   let client = gmailClient(p.account)
   let r = await client.users.messages.get({ userId: "me", id: p.messageId, format: "full" })
@@ -213,6 +211,7 @@ let handleGmailMarkRead = async (body: unknown) => {
   let v = validate(GmailModifyRequest, body)
   if (!v.success) return { status: 400, error: v.error }
   let p = v.data
+  let { gmailClient } = await import("../../platforms/gmail/MailSource")
 
   let client = gmailClient(p.account)
   let r = await client.users.messages.modify({
@@ -227,6 +226,7 @@ let handleGmailArchive = async (body: unknown) => {
   let v = validate(GmailModifyRequest, body)
   if (!v.success) return { status: 400, error: v.error }
   let p = v.data
+  let { gmailClient } = await import("../../platforms/gmail/MailSource")
 
   let client = gmailClient(p.account)
   let r = await client.users.messages.modify({
@@ -238,6 +238,7 @@ let handleGmailArchive = async (body: unknown) => {
 }
 
 let handleGmailAccounts = async (body: unknown) => {
+  let { listAccounts: listGmailAccounts } = await import("../../platforms/gmail/accounts")
   let { accounts } = listGmailAccounts()
   return { status: 200, data: { accounts } }
 }
@@ -250,6 +251,7 @@ let handleSlackSearch = async (body: unknown) => {
   let v = validate(SlackSearchRequest, body)
   if (!v.success) return { status: 400, error: v.error }
   let p = v.data
+  let { slackClients } = await import("../../platforms/slack/slackClient")
 
   let clients = slackClients(p.account)
   if (!clients.user) {
@@ -269,6 +271,10 @@ let handleSlackRead = async (body: unknown) => {
   let v = validate(SlackReadRequest, body)
   if (!v.success) return { status: 400, error: v.error }
   let p = v.data
+  let [{ slackClients }, { toUnifiedMessage: slackToUnifiedMessage }] = await Promise.all([
+    import("../../platforms/slack/slackClient"),
+    import("../../platforms/slack/toUnifiedMessage"),
+  ])
 
   let clients = slackClients(p.account)
 
@@ -295,7 +301,7 @@ let handleSlackRead = async (body: unknown) => {
   let msg = (r.messages ?? [])[0]
   if (!msg) return { status: 404, error: `No message found at ${channelId}:${p.ts}` }
 
-  let userCache: UserCache = new Map()
+  let userCache = new Map<string, string>()
   if (msg.user) {
     try {
       let u = await clients.bot.users.info({ user: msg.user })
@@ -304,7 +310,7 @@ let handleSlackRead = async (body: unknown) => {
     } catch { /* proceed without name */ }
   }
 
-  let unified = slackToUnifiedMessage(msg as SlackMessage, {
+  let unified = slackToUnifiedMessage(msg as Parameters<typeof slackToUnifiedMessage>[0], {
     channelId,
     channelName,
     teamId: clients.teamId ?? "",
@@ -314,6 +320,7 @@ let handleSlackRead = async (body: unknown) => {
 }
 
 let handleSlackAccounts = async (body: unknown) => {
+  let { listSlackAccounts } = await import("../../platforms/slack/accounts")
   let { accounts } = listSlackAccounts()
   return { status: 200, data: { accounts } }
 }
@@ -326,6 +333,11 @@ let handleIngest = async (body: unknown) => {
   let v = validate(IngestRequest, body)
   if (!v.success) return { status: 400, error: v.error }
   let p = v.data
+  let [{ ingestOnce, buildDefaultStatePath }, gmailMail, slackMail] = await Promise.all([
+    import("../ingest/ingest"),
+    import("../../platforms/gmail/MailSource"),
+    import("../../platforms/slack/SlackSource"),
+  ])
 
   let statePath = p.state
     ? path.resolve(p.state)
@@ -340,12 +352,12 @@ let handleIngest = async (body: unknown) => {
   }
 
   let sources: Array<{ source: MessageSource; accounts: string[] }> = []
-  if (gmailAccounts.length) sources.push({ source: gmailSource, accounts: gmailAccounts })
-  if (slackAccounts.length) sources.push({ source: slackSource, accounts: slackAccounts })
+  if (gmailAccounts.length) sources.push({ source: gmailMail.gmailSource, accounts: gmailAccounts })
+  if (slackAccounts.length) sources.push({ source: slackMail.slackSource, accounts: slackAccounts })
 
   let resolveMarkRead = (msg: UnifiedMessage, account: string) => {
-    if (msg.platform === "slack") return markSlackRead(msg, account)
-    return markGmailRead(msg, account)
+    if (msg.platform === "slack") return slackMail.markSlackRead(msg, account)
+    return gmailMail.markGmailRead(msg, account)
   }
 
   // Collect messages into an array instead of writing to stdout
@@ -431,14 +443,14 @@ let handleDraftCompose = async (body: unknown) => {
   let p = v.data
   let now = new Date().toISOString()
   let draft: Draft = { ...p, id: generateDraftId(), createdAt: now, updatedAt: now } as Draft
-  saveDraft(draft)
+  saveDraft(p.workspaceId, draft)
   return { status: 200, data: draft }
 }
 
 let handleDraftList = async (body: unknown) => {
   let v = validate(DraftListRequest, body)
   if (!v.success) return { status: 400, error: v.error }
-  let drafts = listDrafts(v.data.platform)
+  let drafts = listDrafts(v.data.workspaceId, v.data.platform)
   return { status: 200, data: { drafts } }
 }
 
@@ -446,7 +458,7 @@ let handleDraftShow = async (body: unknown) => {
   let v = validate(DraftIdParam, body)
   if (!v.success) return { status: 400, error: v.error }
   try {
-    let draft = loadDraft(v.data.id)
+    let draft = loadDraft(v.data.workspaceId, v.data.id)
     return { status: 200, data: draft }
   } catch (e) {
     return { status: 404, error: (e as Error).message }
@@ -459,7 +471,7 @@ let handleDraftUpdate = async (body: unknown) => {
   let p = v.data
   let draft: Draft
   try {
-    draft = loadDraft(p.id)
+    draft = loadDraft(p.workspaceId, p.id)
   } catch (e) {
     return { status: 404, error: (e as Error).message }
   }
@@ -484,7 +496,7 @@ let handleDraftUpdate = async (body: unknown) => {
   }
 
   draft.updatedAt = new Date().toISOString()
-  saveDraft(draft)
+  saveDraft(p.workspaceId, draft)
   return { status: 200, data: draft }
 }
 
@@ -492,7 +504,7 @@ let handleDraftDelete = async (body: unknown) => {
   let v = validate(DraftIdParam, body)
   if (!v.success) return { status: 400, error: v.error }
   try {
-    deleteDraft(v.data.id)
+    deleteDraft(v.data.workspaceId, v.data.id)
     return { status: 200, data: { deleted: true, id: v.data.id } }
   } catch (e) {
     return { status: 404, error: (e as Error).message }
@@ -504,8 +516,27 @@ let handleDraftDelete = async (body: unknown) => {
 // ---------------------------------------------------------------------------
 
 type Handler = (body: unknown) => Promise<{ status: number; data?: unknown; error?: string }>
+export type Capability =
+  | "read"
+  | "ingest"
+  | "drafts"
+  | "send"
+  | "workspace_read"
+  | "workspace_write"
+  | "workspace_actions"
+  | "all"
 
-let buildRoutes = (opts: ServeOptions): Record<string, Handler> => {
+export type TokenSpec = {
+  token: string
+  capabilities: Capability[]
+}
+
+type RouteDef = {
+  handler: Handler
+  capabilities: Capability[]
+}
+
+let buildRoutes = (opts: ServeOptions): Record<string, RouteDef> => {
   let rateLimiter = createRateLimiter(opts.sendRateLimit)
 
   let guardedGmailSend: Handler = async (body) => {
@@ -527,6 +558,10 @@ let buildRoutes = (opts: ServeOptions): Record<string, Handler> => {
     if (to.length === 0 && cc.length === 0 && bcc.length === 0) {
       return { status: 400, error: "No allowed recipients remain after filtering. Check --gmail-allow-to." }
     }
+    let [{ buildRawMessage, base64url }, { gmailClient }] = await Promise.all([
+      import("../../platforms/gmail/mail"),
+      import("../../platforms/gmail/MailSource"),
+    ])
 
     let raw = buildRawMessage({
       from: p.from,
@@ -568,6 +603,7 @@ let buildRoutes = (opts: ServeOptions): Record<string, Handler> => {
     if (!isSlackChannelAllowed(p.channel, opts.slackAllowChannels)) {
       return { status: 400, error: `Channel "${p.channel}" is not in --slack-allow-channels.` }
     }
+    let { slackClients, uploadFilesToChannel } = await import("../../platforms/slack/slackClient")
 
     let clients = slackClients(p.account)
     let sendClient = p.asUser && clients.user ? clients.user : clients.bot
@@ -626,7 +662,7 @@ let buildRoutes = (opts: ServeOptions): Record<string, Handler> => {
 
     let draft: Draft
     try {
-      draft = loadDraft(p.id)
+      draft = loadDraft(p.workspaceId, p.id)
     } catch (e) {
       return { status: 404, error: (e as Error).message }
     }
@@ -652,35 +688,42 @@ let buildRoutes = (opts: ServeOptions): Record<string, Handler> => {
     }
 
     try {
+      let { sendDraft } = await import("../draft/send")
       let result = await sendDraft(draft)
-      if (!p.keep) deleteDraft(draft.id)
+      if (!p.keep) deleteDraft(p.workspaceId, draft.id)
       return { status: 200, data: { sent: true, draftId: draft.id, deleted: !p.keep, result } }
     } catch (e) {
       return { status: 500, error: (e as Error).message }
     }
   }
 
+  let workspaceHandlers = createWorkspaceHandlers(opts)
   return {
-    "POST /api/gmail/search": handleGmailSearch,
-    "POST /api/gmail/count": handleGmailCount,
-    "POST /api/gmail/thread": handleGmailThread,
-    "POST /api/gmail/read": handleGmailRead,
-    "POST /api/gmail/send": guardedGmailSend,
-    "POST /api/gmail/mark-read": handleGmailMarkRead,
-    "POST /api/gmail/archive": handleGmailArchive,
-    "POST /api/gmail/accounts": handleGmailAccounts,
-    "POST /api/slack/search": handleSlackSearch,
-    "POST /api/slack/read": handleSlackRead,
-    "POST /api/slack/send": guardedSlackSend,
-    "POST /api/slack/accounts": handleSlackAccounts,
-    "POST /api/ingest": handleIngest,
-    "POST /api/draft/compose": handleDraftCompose,
-    "POST /api/draft/list": handleDraftList,
-    "POST /api/draft/show": handleDraftShow,
-    "POST /api/draft/update": handleDraftUpdate,
-    "POST /api/draft/send": guardedDraftSend,
-    "POST /api/draft/delete": handleDraftDelete,
-    ...createWorkspaceHandlers(opts),
+    "POST /api/gmail/search": { handler: handleGmailSearch, capabilities: ["read"] },
+    "POST /api/gmail/count": { handler: handleGmailCount, capabilities: ["read"] },
+    "POST /api/gmail/thread": { handler: handleGmailThread, capabilities: ["read"] },
+    "POST /api/gmail/read": { handler: handleGmailRead, capabilities: ["read"] },
+    "POST /api/gmail/send": { handler: guardedGmailSend, capabilities: ["send"] },
+    "POST /api/gmail/mark-read": { handler: handleGmailMarkRead, capabilities: ["send"] },
+    "POST /api/gmail/archive": { handler: handleGmailArchive, capabilities: ["send"] },
+    "POST /api/gmail/accounts": { handler: handleGmailAccounts, capabilities: ["read"] },
+    "POST /api/slack/search": { handler: handleSlackSearch, capabilities: ["read"] },
+    "POST /api/slack/read": { handler: handleSlackRead, capabilities: ["read"] },
+    "POST /api/slack/send": { handler: guardedSlackSend, capabilities: ["send"] },
+    "POST /api/slack/accounts": { handler: handleSlackAccounts, capabilities: ["read"] },
+    "POST /api/ingest": { handler: handleIngest, capabilities: ["ingest"] },
+    "POST /api/draft/compose": { handler: handleDraftCompose, capabilities: ["drafts"] },
+    "POST /api/draft/list": { handler: handleDraftList, capabilities: ["drafts"] },
+    "POST /api/draft/show": { handler: handleDraftShow, capabilities: ["drafts"] },
+    "POST /api/draft/update": { handler: handleDraftUpdate, capabilities: ["drafts"] },
+    "POST /api/draft/send": { handler: guardedDraftSend, capabilities: ["send"] },
+    "POST /api/draft/delete": { handler: handleDraftDelete, capabilities: ["drafts"] },
+    "POST /api/workspace/export": { handler: workspaceHandlers["POST /api/workspace/export"], capabilities: ["workspace_read"] },
+    "POST /api/workspace/bootstrap": { handler: workspaceHandlers["POST /api/workspace/bootstrap"], capabilities: ["workspace_write"] },
+    "POST /api/workspace/import": { handler: workspaceHandlers["POST /api/workspace/import"], capabilities: ["workspace_write"] },
+    "POST /api/workspace/refresh": { handler: workspaceHandlers["POST /api/workspace/refresh"], capabilities: ["ingest"] },
+    "POST /api/workspace/push": { handler: workspaceHandlers["POST /api/workspace/push"], capabilities: ["workspace_write"] },
+    "POST /api/workspace/actions": { handler: workspaceHandlers["POST /api/workspace/actions"], capabilities: ["workspace_actions"] },
   }
 }
 
@@ -690,13 +733,16 @@ let buildRoutes = (opts: ServeOptions): Record<string, Handler> => {
 
 export type ServeOptions = {
   port: number
-  token: string
+  tokens: TokenSpec[]
   host: string
   verbose: boolean
   gmailAllowTo: string[]
   slackAllowChannels: string[]
   sendRateLimit: number
 }
+
+let hasCapabilities = (tokenSpec: TokenSpec, required: Capability[]) =>
+  tokenSpec.capabilities.includes("all") || required.every(cap => tokenSpec.capabilities.includes(cap))
 
 export let createServer = (opts: ServeOptions) => {
   let routes = buildRoutes(opts)
@@ -714,20 +760,21 @@ export let createServer = (opts: ServeOptions) => {
       return
     }
 
-    // Auth check
-    let authToken = req.headers["x-auth-token"]
-    if (authToken !== opts.token) {
-      fail(res, 401, "Unauthorized: invalid or missing X-Auth-Token header")
-      return
-    }
-
     // Route lookup
     let routeKey = `${req.method} ${req.url}`
-    let handler = routes[routeKey]
+    let route = routes[routeKey]
 
-    if (!handler) {
+    if (!route) {
       // Try GET /api/health as a special case (no body needed)
       if (req.method === "GET" && req.url === "/api/health") {
+        let authToken = req.headers["x-auth-token"]
+        let tokenSpec = typeof authToken === "string"
+          ? opts.tokens.find(token => token.token === authToken)
+          : undefined
+        if (!tokenSpec || !hasCapabilities(tokenSpec, ["read"])) {
+          fail(res, 401, "Unauthorized: invalid or missing X-Auth-Token header")
+          return
+        }
         ok(res, { status: "ok", uptime: process.uptime() })
         return
       }
@@ -735,10 +782,23 @@ export let createServer = (opts: ServeOptions) => {
       return
     }
 
+    let authToken = req.headers["x-auth-token"]
+    let tokenSpec = typeof authToken === "string"
+      ? opts.tokens.find(token => token.token === authToken)
+      : undefined
+    if (!tokenSpec) {
+      fail(res, 401, "Unauthorized: invalid or missing X-Auth-Token header")
+      return
+    }
+    if (!hasCapabilities(tokenSpec, route.capabilities)) {
+      fail(res, 403, `Forbidden: token lacks required capabilities (${route.capabilities.join(", ")})`)
+      return
+    }
+
     try {
       let body = await parseBody(req)
       verboseLog(opts.verbose, "request", { method: req.method, url: req.url })
-      let result = await handler(body)
+      let result = await route.handler(body)
       if (result.error) {
         fail(res, result.status, result.error)
       } else {
@@ -760,7 +820,8 @@ export let startServer = (opts: ServeOptions) =>
     server.on("error", reject)
     server.listen(opts.port, opts.host, () => {
       console.log(`[msgmon] server listening on http://${opts.host}:${opts.port}`)
-      console.log(`[msgmon] 23 routes registered`)
+      console.log(`[msgmon] 25 routes registered`)
+      console.log(`[msgmon] auth tokens: ${opts.tokens.length}`)
       if (opts.gmailAllowTo.length) console.log(`[msgmon] gmail-allow-to: ${opts.gmailAllowTo.join(", ")}`)
       if (opts.slackAllowChannels.length) console.log(`[msgmon] slack-allow-channels: ${opts.slackAllowChannels.join(", ")}`)
       if (opts.sendRateLimit > 0) console.log(`[msgmon] send-rate-limit: ${opts.sendRateLimit}/min`)

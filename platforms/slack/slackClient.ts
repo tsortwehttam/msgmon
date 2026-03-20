@@ -33,14 +33,22 @@ export let uploadFilesToChannel = async (
 ) => {
   let results = []
   for (let file of files) {
-    let r = await client.filesUploadV2({
+    let baseRequest: {
+      channel_id: string
+      file: Buffer
+      filename: string
+      title: string
+      initial_comment?: string
+    } = {
       channel_id: channelId,
       file: file.data,
       filename: file.filename,
       title: file.filename,
-      thread_ts: opts?.threadTs,
       initial_comment: results.length === 0 ? opts?.initialComment : undefined,
-    })
+    }
+    let r: Awaited<ReturnType<WebClient["filesUploadV2"]>> = opts?.threadTs
+      ? await client.filesUploadV2({ ...baseRequest, thread_ts: opts.threadTs })
+      : await client.filesUploadV2(baseRequest)
     results.push(r)
   }
   return results

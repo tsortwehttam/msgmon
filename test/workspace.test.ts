@@ -8,6 +8,7 @@ let tmpDir: string
 let prevCwd: string
 let workspaceStore: typeof import("../src/workspace/store")
 let workspaceApi: typeof import("../src/workspace/api")
+let draftStore: typeof import("../src/draft/store")
 
 let makeDraft = (id: string) => ({
   id,
@@ -30,6 +31,7 @@ before(async () => {
   process.chdir(tmpDir)
   workspaceStore = await import("../src/workspace/store")
   workspaceApi = await import("../src/workspace/api")
+  draftStore = await import("../src/draft/store")
 })
 
 after(() => {
@@ -74,7 +76,7 @@ describe("workspace store", () => {
     })
 
     assert.notEqual(pushed.revision, initial.revision)
-    assert.equal(workspaceStore.loadWorkspaceDraft("beta", "draft-1").id, "draft-1")
+    assert.equal(draftStore.loadDraft("beta", "draft-1").id, "draft-1")
 
     assert.throws(
       () => workspaceStore.applyWorkspacePush("beta", {
@@ -91,6 +93,28 @@ describe("workspace store", () => {
       }),
       /read-only/,
     )
+  })
+
+  it("exports and imports workspace bundles", () => {
+    workspaceStore.initWorkspace("bundle-src", { name: "Bundle Source" })
+    workspaceStore.applyWorkspacePush("bundle-src", {
+      baseRevision: workspaceStore.exportWorkspaceSnapshot("bundle-src").revision,
+      files: [{
+        path: "status.md",
+        contentBase64: Buffer.from("# Status\n\nBundled\n", "utf8").toString("base64"),
+      }],
+    })
+
+    let bundle = workspaceStore.exportWorkspaceBundle("bundle-src")
+    let imported = workspaceStore.importWorkspaceBundle({
+      workspaceId: "bundle-dst",
+      bundleBase64: bundle.bundleBase64,
+    })
+
+    assert.equal(imported.workspaceId, "bundle-dst")
+    assert.equal(workspaceStore.loadWorkspaceConfig("bundle-dst").name, "Bundle Source")
+    let status = Buffer.from(imported.files.find(file => file.path === "status.md")!.contentBase64, "base64").toString("utf8")
+    assert.match(status, /Bundled/)
   })
 })
 
@@ -116,13 +140,13 @@ describe("workspace API handlers", () => {
       }],
     })
     assert.equal(push.status, 200)
-    assert.equal(workspaceStore.loadWorkspaceDraft("gamma", "draft-2").id, "draft-2")
+    assert.equal(draftStore.loadDraft("gamma", "draft-2").id, "draft-2")
 
     let action = await handlers["POST /api/workspace/actions"]({
       workspaceId: "gamma",
       actions: [{ type: "draft.delete", draftId: "draft-2" }],
     })
     assert.equal(action.status, 200)
-    assert.throws(() => workspaceStore.loadWorkspaceDraft("gamma", "draft-2"), /not found/)
+    assert.throws(() => draftStore.loadDraft("gamma", "draft-2"), /not found/)
   })
 })

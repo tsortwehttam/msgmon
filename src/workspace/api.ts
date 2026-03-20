@@ -1,16 +1,20 @@
 import type { Draft } from "../draft/schema"
 import {
-  WorkspaceIdParam,
+  WorkspaceExportRequest,
   WorkspaceRefreshRequest,
+  WorkspaceBootstrapRequest,
+  WorkspaceImportRequest,
   WorkspacePushRequest,
   WorkspaceActionRequest,
 } from "../serve/schema"
 import {
+  initWorkspace,
   exportWorkspaceSnapshot,
+  exportWorkspaceBundle,
   applyWorkspacePush,
-  loadWorkspaceDraft,
-  deleteWorkspaceDraft,
+  importWorkspaceBundle,
 } from "./store"
+import { loadDraft, deleteDraft } from "../draft/store"
 
 export type WorkspaceHandler = (body: unknown) => Promise<{ status: number; data?: unknown; error?: string }>
 
@@ -72,8 +76,9 @@ export let createWorkspaceHandlers = (opts: WorkspaceApiOptions): Record<string,
   let rateLimiter = createRateLimiter(opts.sendRateLimit)
 
   let handleWorkspaceExport: WorkspaceHandler = async body => {
-    let v = validateBody(WorkspaceIdParam, body)
+    let v = validateBody(WorkspaceExportRequest, body)
     if (!v.success) return { status: 400, error: v.error }
+    if (v.data.format === "bundle") return { status: 200, data: exportWorkspaceBundle(v.data.workspaceId) }
     return { status: 200, data: exportWorkspaceSnapshot(v.data.workspaceId) }
   }
 
@@ -108,6 +113,37 @@ export let createWorkspaceHandlers = (opts: WorkspaceApiOptions): Record<string,
     }
   }
 
+  let handleWorkspaceBootstrap: WorkspaceHandler = async body => {
+    let v = validateBody(WorkspaceBootstrapRequest, body)
+    if (!v.success) return { status: 400, error: v.error }
+    try {
+      let result = initWorkspace(v.data.workspaceId, {
+        name: v.data.name,
+        accounts: v.data.accounts,
+        query: v.data.query,
+        overwrite: v.data.overwrite,
+      })
+      return { status: 200, data: { workspaceId: result.config.id, config: result.config, path: result.path } }
+    } catch (err) {
+      return { status: 400, error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
+  let handleWorkspaceImport: WorkspaceHandler = async body => {
+    let v = validateBody(WorkspaceImportRequest, body)
+    if (!v.success) return { status: 400, error: v.error }
+    try {
+      let result = importWorkspaceBundle({
+        workspaceId: v.data.workspaceId,
+        bundleBase64: v.data.bundleBase64,
+        overwrite: v.data.overwrite,
+      })
+      return { status: 200, data: result }
+    } catch (err) {
+      return { status: 400, error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
   let handleWorkspaceActions: WorkspaceHandler = async body => {
     let v = validateBody(WorkspaceActionRequest, body)
     if (!v.success) return { status: 400, error: v.error }
@@ -117,7 +153,7 @@ export let createWorkspaceHandlers = (opts: WorkspaceApiOptions): Record<string,
     for (let action of p.actions) {
       if (action.type === "draft.delete") {
         try {
-          deleteWorkspaceDraft(p.workspaceId, action.draftId)
+          deleteDraft(p.workspaceId, action.draftId)
           results.push({ type: action.type, draftId: action.draftId, deleted: true })
         } catch (err) {
           return { status: 404, error: err instanceof Error ? err.message : String(err) }
@@ -133,7 +169,7 @@ export let createWorkspaceHandlers = (opts: WorkspaceApiOptions): Record<string,
 
         let draft: Draft
         try {
-          draft = loadWorkspaceDraft(p.workspaceId, action.draftId)
+          draft = loadDraft(p.workspaceId, action.draftId)
         } catch (err) {
           return { status: 404, error: err instanceof Error ? err.message : String(err) }
         }
@@ -155,7 +191,7 @@ export let createWorkspaceHandlers = (opts: WorkspaceApiOptions): Record<string,
         try {
           let { sendDraft } = await import("../draft/send")
           let result = await sendDraft(draft)
-          if (!action.keep) deleteWorkspaceDraft(p.workspaceId, action.draftId)
+          if (!action.keep) deleteDraft(p.workspaceId, action.draftId)
           results.push({ type: action.type, draftId: action.draftId, sent: true, deleted: !action.keep, result })
         } catch (err) {
           return { status: 500, error: err instanceof Error ? err.message : String(err) }
@@ -216,6 +252,8 @@ export let createWorkspaceHandlers = (opts: WorkspaceApiOptions): Record<string,
 
   return {
     "POST /api/workspace/export": handleWorkspaceExport,
+    "POST /api/workspace/bootstrap": handleWorkspaceBootstrap,
+    "POST /api/workspace/import": handleWorkspaceImport,
     "POST /api/workspace/refresh": handleWorkspaceRefresh,
     "POST /api/workspace/push": handleWorkspacePush,
     "POST /api/workspace/actions": handleWorkspaceActions,

@@ -21,6 +21,17 @@ let command = commandIndex >= 0 ? args[commandIndex] : undefined
 let commandArgs = commandIndex >= 0 ? args.slice(commandIndex + 1) : []
 let forwardedVerboseArgs = verbose ? ["--verbose"] : []
 let dispatched = false
+let helpBuilder = (y: import("yargs").Argv) =>
+  y
+    .positional("platform", {
+      type: "string",
+      choices: ["gmail", "slack", "teams", "whatsapp", "ingest", "watch", "corpus", "serve", "draft", "workspace"] as const,
+      describe: "Platform or command to show help for",
+    })
+    .positional("command", {
+      type: "string",
+      describe: "Subcommand to show help for",
+    })
 
 let cli = yargs(args)
   .scriptName("msgmon")
@@ -44,33 +55,25 @@ let cli = yargs(args)
   .command(
     "help [platform] [command]",
     "Show main help or help for a specific platform/command",
-    y =>
-      y
-        .positional("platform", {
-          type: "string",
-          choices: ["gmail", "slack", "teams", "whatsapp", "ingest", "watch", "corpus", "serve", "draft", "workspace"] as const,
-          describe: "Platform or command to show help for",
-        })
-        .positional("command", {
-          type: "string",
-          describe: "Subcommand to show help for",
-        }),
+    helpBuilder as never,
     async argv => {
-      if (!argv.platform) {
+      let platform = argv.platform as string | undefined
+      let subcommand = argv.command as string | undefined
+      if (!platform) {
         cli.showHelp()
         return
       }
-      let helpArgs = argv.command ? [argv.command, "--help"] : ["--help"]
-      if (argv.platform === "gmail") return parseGmailCli(helpArgs, "msgmon gmail")
-      if (argv.platform === "ingest") return parseIngestCli(helpArgs, "msgmon ingest")
-      if (argv.platform === "watch") return parseWatchCli(helpArgs, "msgmon watch")
-      if (argv.platform === "corpus") return parseCorpusCli(helpArgs, "msgmon corpus")
-      if (argv.platform === "serve") return parseServeCli(helpArgs, "msgmon serve")
-      if (argv.platform === "slack") return parseSlackCli(helpArgs, "msgmon slack")
-      if (argv.platform === "teams") return parseTeamsCli(helpArgs, "msgmon teams")
-      if (argv.platform === "whatsapp") return parseWhatsAppCli(helpArgs, "msgmon whatsapp")
-      if (argv.platform === "draft") return parseDraftCli(helpArgs, "msgmon draft")
-      if (argv.platform === "workspace") return parseWorkspaceCli(helpArgs, "msgmon workspace")
+      let helpArgs: string[] = subcommand ? [subcommand, "--help"] : ["--help"]
+      if (platform === "gmail") await parseGmailCli(helpArgs, "msgmon gmail")
+      else if (platform === "ingest") await parseIngestCli(helpArgs, "msgmon ingest")
+      else if (platform === "watch") await parseWatchCli(helpArgs, "msgmon watch")
+      else if (platform === "corpus") await parseCorpusCli(helpArgs, "msgmon corpus")
+      else if (platform === "serve") await parseServeCli(helpArgs, "msgmon serve")
+      else if (platform === "slack") await parseSlackCli(helpArgs, "msgmon slack")
+      else if (platform === "teams") await parseTeamsCli(helpArgs, "msgmon teams")
+      else if (platform === "whatsapp") await parseWhatsAppCli(helpArgs, "msgmon whatsapp")
+      else if (platform === "draft") await parseDraftCli(helpArgs, "msgmon draft")
+      else if (platform === "workspace") await parseWorkspaceCli(helpArgs, "msgmon workspace")
     },
   )
   .example("$0 help", "Show top-level help")

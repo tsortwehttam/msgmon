@@ -93,22 +93,22 @@ msgmon watch --sink=exec --exec-cmd='./agent.sh' --mark-read
 
 ### `msgmon draft`
 
-Platform-agnostic draft management. Compose messages targeting any platform, review them, and send when ready. Drafts created through the direct draft CLI are stored locally as JSON files at `.msgmon/drafts/`.
+Workspace-owned draft management. Compose messages targeting any platform, review them, and send when ready. Drafts now live under `.msgmon/workspaces/<workspaceId>/drafts/` and every draft command requires `--workspace`.
 
 ```bash
 # Compose a gmail draft (reply to a thread)
-msgmon draft compose --platform=gmail --to=alice@example.com --subject="Re: Project" \
+msgmon draft compose --workspace=inbox-agent --platform=gmail --to=alice@example.com --subject="Re: Project" \
   --body="Sounds good" --thread-id=18f3a... --in-reply-to="<abc@example.com>"
 
 # Compose a slack draft
-msgmon draft compose --platform=slack --channel='#general' --text="Weekly update" --attach=./report.pdf
+msgmon draft compose --workspace=inbox-agent --platform=slack --channel='#general' --text="Weekly update" --attach=./report.pdf
 
 # List, show, edit, send, delete
-msgmon draft list --format=text
-msgmon draft show <id>
-msgmon draft edit <id> --body="Updated body"
-msgmon draft send <id> --yes
-msgmon draft delete <id>
+msgmon draft list --workspace=inbox-agent --format=text
+msgmon draft show <id> --workspace=inbox-agent
+msgmon draft edit <id> --workspace=inbox-agent --body="Updated body"
+msgmon draft send <id> --workspace=inbox-agent --yes
+msgmon draft delete <id> --workspace=inbox-agent
 ```
 
 Draft IDs support prefix matching — `msgmon draft show abc` matches a draft whose ID starts with `abc`.
@@ -154,9 +154,15 @@ msgmon serve --token=mysecret
 msgmon serve --token=mysecret --port=8080 --host=0.0.0.0
 msgmon serve --token=mysecret --gmail-allow-to=a@x.com,b@x.com --send-rate-limit=10
 msgmon serve --token=mysecret --slack-allow-channels=general,alerts
+msgmon serve --scoped-token=reader=read,workspace_read --scoped-token=writer=workspace_write,drafts
 ```
 
 Every request must include the header `X-Auth-Token: <token>`. All endpoints accept `POST` with a JSON body and return `{ ok: true, data: ... }` or `{ ok: false, error: "..." }`. Request bodies are validated with Zod.
+
+**Token capabilities:**
+- `--token` creates a full-access token.
+- `--scoped-token=<token>=<cap1>,<cap2>` creates a restricted token.
+- Available capabilities: `read`, `ingest`, `drafts`, `send`, `workspace_read`, `workspace_write`, `workspace_actions`.
 
 **Send filtering:**
 - `--gmail-allow-to` — comma-separated list of allowed email recipients. Disallowed addresses are silently stripped from to/cc/bcc. If no allowed recipients remain, the request returns 400. Omit to allow all.
@@ -178,13 +184,15 @@ Every request must include the header `X-Auth-Token: <token>`. All endpoints acc
 | `POST /api/slack/send` | Post a message (`{ channel, text?, account?, threadTs?, asUser?, attachments? }`) |
 | `POST /api/slack/accounts` | List Slack workspaces (`{}`) |
 | `POST /api/ingest` | One-shot ingest (`{ accounts?, query?, maxResults?, markRead?, seed? }`) |
-| `POST /api/draft/compose` | Create a draft (`{ platform, to\|channel, ... }`) |
-| `POST /api/draft/list` | List drafts (`{ platform? }`) |
-| `POST /api/draft/show` | Show a draft (`{ id }`) |
-| `POST /api/draft/update` | Update draft fields (`{ id, ...fields }`) |
-| `POST /api/draft/send` | Send a draft (`{ id, keep? }`) |
-| `POST /api/draft/delete` | Delete a draft (`{ id }`) |
-| `POST /api/workspace/export` | Export agent-safe workspace snapshot (`{ workspaceId }`) |
+| `POST /api/draft/compose` | Create a draft (`{ workspaceId, platform, to\|channel, ... }`) |
+| `POST /api/draft/list` | List drafts (`{ workspaceId, platform? }`) |
+| `POST /api/draft/show` | Show a draft (`{ workspaceId, id }`) |
+| `POST /api/draft/update` | Update draft fields (`{ workspaceId, id, ...fields }`) |
+| `POST /api/draft/send` | Send a draft (`{ workspaceId, id, keep? }`) |
+| `POST /api/draft/delete` | Delete a draft (`{ workspaceId, id }`) |
+| `POST /api/workspace/export` | Export agent-safe workspace snapshot or bundle (`{ workspaceId, format? }`) |
+| `POST /api/workspace/bootstrap` | Create a workspace (`{ workspaceId, name?, accounts?, query?, overwrite? }`) |
+| `POST /api/workspace/import` | Import a bundled workspace (`{ workspaceId?, bundleBase64, overwrite? }`) |
 | `POST /api/workspace/refresh` | Ingest new messages into workspace inbox (`{ workspaceId, maxResults?, markRead?, saveAttachments?, seed? }`) |
 | `POST /api/workspace/push` | Push bounded file edits (`{ workspaceId, baseRevision, files[] }`) |
 | `POST /api/workspace/actions` | Apply privileged workspace actions (`{ workspaceId, actions[] }`) |
@@ -193,7 +201,9 @@ Every request must include the header `X-Auth-Token: <token>`. All endpoints acc
 **Attachments** (for `/api/gmail/send` and `/api/slack/send`): pass an `attachments` array in the JSON body. Each attachment is `{ filename, data, contentType? }` where `data` is base64-encoded file content. Slack file uploads require the `files:write` bot/user scope.
 
 **Workspace sync model:**
-- `/api/workspace/export` returns the current agent-safe workspace files plus a revision hash.
+- `/api/workspace/export` returns either a JSON snapshot or a gzip-compressed bundle export.
+- `/api/workspace/bootstrap` creates a new server-owned workspace.
+- `/api/workspace/import` imports a previously exported bundle into a new or existing workspace.
 - `/api/workspace/push` accepts bounded changes back for writable files such as `status.md`, `drafts/*.json`, and `corpus/**`.
 - `/api/workspace/actions` is the policy gate for privileged operations such as sending drafts, marking messages read, and archiving Gmail.
 - Hidden server files such as state and workspace-local credentials are not included in exports.
@@ -342,7 +352,12 @@ Run `msgmon serve` in the trusted environment where OAuth credentials live. The 
 # On the server (has credentials)
 msgmon workspace init inbox-agent --account=default --query='is:unread'
 msgmon workspace refresh inbox-agent
-msgmon serve --token=agent-secret --gmail-allow-to=allowed@example.com --send-rate-limit=5
+msgmon serve \
+  --scoped-token=reader=read,workspace_read \
+  --scoped-token=writer=workspace_write,drafts \
+  --scoped-token=actor=workspace_actions \
+  --gmail-allow-to=allowed@example.com \
+  --send-rate-limit=5
 
 # The agent workflow is:
 # POST /api/workspace/export   — fetch agent-safe workspace snapshot
