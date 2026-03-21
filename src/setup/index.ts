@@ -40,11 +40,11 @@ let waitForEnter = async (message = "Press Enter to continue...") => {
 // Status display
 // ---------------------------------------------------------------------------
 
-let ok = (msg: string) => console.log(`  [ok] ${msg}`)
-let skip = (msg: string) => console.log(`  [skip] ${msg}`)
-let info = (msg: string) => console.log(`  [..] ${msg}`)
-let fail = (msg: string) => console.log(`  [!!] ${msg}`)
-let step = (n: number, title: string) => console.log(`\n--- Step ${n}: ${title} ---\n`)
+let ok = (msg: string) => console.log(`[ok] ${msg}`)
+let skip = (msg: string) => console.log(`[skip] ${msg}`)
+let info = (msg: string) => console.log(`[..] ${msg}`)
+let fail = (msg: string) => console.log(`[!!] ${msg}`)
+let step = (n: number, title: string) => console.log(`[${n}] ${title}`)
 
 // ---------------------------------------------------------------------------
 // Gmail credentials check
@@ -70,23 +70,12 @@ let checkGmailCredentials = async (): Promise<boolean> => {
     fail("No Gmail credentials.json found.")
   }
 
-  console.log(`
-  To create Gmail OAuth credentials:
-
-    1. Go to https://console.cloud.google.com/
-    2. Create a new project (or select an existing one)
-    3. Enable the Gmail API:
-       APIs & Services > Library > search "Gmail API" > Enable
-    4. Configure the OAuth consent screen:
-       APIs & Services > OAuth consent screen > External > fill required fields
-       Add scopes: gmail.readonly, gmail.modify, gmail.send
-    5. Create OAuth credentials:
-       APIs & Services > Credentials > Create Credentials > OAuth client ID
-       Application type: Desktop app
-    6. Download the JSON file and save it as:
-
-       ${candidates[0]}
-`)
+  console.log(`To create Gmail OAuth credentials:
+1. Go to https://console.cloud.google.com/ — create/select a project
+2. Enable the Gmail API (APIs & Services > Library)
+3. Configure OAuth consent screen (External, add gmail.readonly/modify/send scopes)
+4. Create OAuth client ID (Desktop app) under Credentials
+5. Download the JSON and save it as: ${candidates[0]}`)
 
   await waitForEnter("Press Enter after saving credentials.json...")
 
@@ -104,7 +93,7 @@ let checkGmailCredentials = async (): Promise<boolean> => {
   }
 
   fail("Still no valid Gmail credentials.json found.")
-  console.log("  You can re-run `msgmon setup` after placing the file.\n")
+  console.log("You can re-run `msgmon setup` after placing the file.")
   return false
 }
 
@@ -127,7 +116,7 @@ let listGmailTokens = (): string[] => {
 }
 
 let authorizeOneGmailAccount = async (): Promise<boolean> => {
-  let accountName = await prompt("  Account name (e.g. personal, work) [default]: ")
+  let accountName = await prompt("Account name (e.g. personal, work) [default]: ")
   if (!accountName) accountName = "default"
 
   let existing = listGmailTokens()
@@ -137,7 +126,7 @@ let authorizeOneGmailAccount = async (): Promise<boolean> => {
   }
 
   info(`Starting OAuth flow for account "${accountName}"...`)
-  info("A browser window will open. Sign in and grant access.\n")
+  info("A browser window will open. Sign in and grant access.")
 
   try {
     let { authenticate } = await import("@google-cloud/local-auth")
@@ -152,7 +141,7 @@ let authorizeOneGmailAccount = async (): Promise<boolean> => {
   } catch (err) {
     let msg = err instanceof Error ? err.message : String(err)
     fail(`OAuth failed: ${msg}`)
-    console.log("  Make sure your credentials.json is valid and try again.\n")
+    console.log("Make sure your credentials.json is valid and try again.")
     return false
   }
 }
@@ -195,7 +184,7 @@ let listSlackTokens = (): string[] => {
 }
 
 let authorizeOneSlackAccount = async (): Promise<boolean> => {
-  let accountName = await prompt("  Slack account name [default]: ")
+  let accountName = await prompt("Slack account name [default]: ")
   if (!accountName) accountName = "default"
 
   let existing = listSlackTokens()
@@ -204,25 +193,16 @@ let authorizeOneSlackAccount = async (): Promise<boolean> => {
     return true
   }
 
-  console.log(`
-  Choose auth mode:
-    1) Bot token — paste an xoxb-... token (simplest)
-    2) OAuth     — browser flow (enables search & send-as-user)
-`)
-
-  let mode = await prompt("  Mode [1]: ")
+  console.log("Auth mode: 1) Bot token (xoxb-..., simplest)  2) OAuth (browser flow)")
+  let mode = await prompt("Mode [1]: ")
 
   if (mode === "2") {
     // OAuth mode
     let credPath = resolveCredentialsPath("slack")
     let hasCredentials = fs.existsSync(credPath)
     if (!hasCredentials) {
-      console.log(`
-  For Slack OAuth, save your app's client_id and client_secret as:
-    ${credPath}
-
-  Format: { "client_id": "...", "client_secret": "..." }
-`)
+      console.log(`Save your Slack app credentials as: ${credPath}`)
+      console.log(`Format: { "client_id": "...", "client_secret": "..." }`)
       await waitForEnter("Press Enter after saving credentials.json...")
       if (!fs.existsSync(credPath)) {
         fail(`Slack credentials not found at ${credPath}`)
@@ -243,7 +223,7 @@ let authorizeOneSlackAccount = async (): Promise<boolean> => {
   }
 
   // Bot token mode
-  let token = await prompt("  Paste your Slack bot token (xoxb-...): ")
+  let token = await prompt("Paste your Slack bot token (xoxb-...): ")
   if (!token) {
     fail("No token provided.")
     return false
@@ -295,8 +275,8 @@ let setupWorkspace = async (workspaceId: string): Promise<boolean> => {
     ok(`Workspace "${workspaceId}" already exists.`)
     try {
       let config = loadWorkspaceConfig(workspaceId)
-      info(`  Accounts: ${config.accounts.join(", ")}`)
-      info(`  Query: ${config.query}`)
+      info(`Accounts: ${config.accounts.join(", ")}`)
+      info(`Query: ${config.query}`)
       return true
     } catch {
       return true
@@ -314,8 +294,8 @@ let setupWorkspace = async (workspaceId: string): Promise<boolean> => {
   try {
     let result = initWorkspace(workspaceId, { accounts })
     ok(`Created workspace "${workspaceId}" at ${result.path}`)
-    info(`  Accounts: ${result.config.accounts.join(", ")}`)
-    info(`  Query: ${result.config.query}`)
+    info(`Accounts: ${result.config.accounts.join(", ")}`)
+    info(`Query: ${result.config.query}`)
     return true
   } catch (err) {
     fail(`Failed to create workspace: ${err instanceof Error ? err.message : String(err)}`)
@@ -344,7 +324,7 @@ let seedWorkspace = async (workspaceId: string): Promise<boolean> => {
     let msg = err instanceof Error ? err.message : String(err)
     if (msg.includes("Missing token")) {
       fail(`Seed failed — missing token. Make sure you've authorized the accounts in this workspace.`)
-      console.log(`  Error: ${msg}\n`)
+      console.log(`Error: ${msg}`)
     } else {
       fail(`Seed failed: ${msg}`)
     }
@@ -365,9 +345,7 @@ export let runSetup = async (options: { workspace?: string }) => {
   })
 
   try {
-    console.log("\nmsgmon setup")
-    console.log("============\n")
-    console.log("This will walk you through setting up msgmon from scratch.\n")
+    console.log("msgmon setup — interactive walkthrough")
 
     // Step 1: Gmail credentials
     step(1, "Gmail Credentials")
@@ -376,7 +354,7 @@ export let runSetup = async (options: { workspace?: string }) => {
     if (!hasCredentials) {
       let cont = await confirm("Continue setup without Gmail credentials?", false)
       if (!cont) {
-        console.log("\nSetup aborted. Re-run `msgmon setup` when ready.\n")
+        console.log("Setup aborted. Re-run `msgmon setup` when ready.")
         return
       }
     }
@@ -398,8 +376,8 @@ export let runSetup = async (options: { workspace?: string }) => {
     // Check we have at least one account
     let allAccounts = inferWorkspaceAccounts()
     if (allAccounts.length === 0) {
-      fail("\nNo platform accounts are configured. You need at least one to continue.")
-      console.log("  Set up Gmail credentials + auth, or add a Slack bot token, then re-run setup.\n")
+      fail("No platform accounts are configured. You need at least one to continue.")
+      console.log("Set up Gmail credentials + auth, or add a Slack bot token, then re-run setup.")
       return
     }
 
@@ -409,7 +387,7 @@ export let runSetup = async (options: { workspace?: string }) => {
     step(4, `Workspace "${workspaceId}"`)
     let hasWorkspace = await setupWorkspace(workspaceId)
     if (!hasWorkspace) {
-      console.log("\nSetup could not create workspace. Fix the issues above and re-run.\n")
+      console.log("Setup could not create workspace. Fix the issues above and re-run.")
       return
     }
 
@@ -419,22 +397,16 @@ export let runSetup = async (options: { workspace?: string }) => {
     if (!seeded) {
       let cont = await confirm("Continue anyway?", true)
       if (!cont) {
-        console.log("\nSetup paused. Fix the issue and re-run `msgmon setup`.\n")
+        console.log("Setup paused. Fix the issue and re-run `msgmon setup`.")
         return
       }
     }
 
     // Done — print instructions
-    console.log("\n--- Setup Complete ---\n")
-    console.log("To start the server and agent, run these in two terminals:\n")
-    console.log("  Terminal 1 (server):")
-    console.log(`    cd ${process.cwd()}`)
-    console.log("    msgmon serve\n")
-    console.log("  Terminal 2 (agent):")
-    console.log(`    cd ${process.cwd()}`)
-    console.log(`    msgmon session start --workspace=${workspaceId} --agent-command='codex .'\n`)
-    console.log("The server auto-generates an auth token and saves it to .msgmon/serve.json.")
-    console.log("The session command reads it automatically — no manual token copy needed.\n")
+    console.log("Setup complete! To start, run in two terminals:")
+    console.log(`  msgmon serve`)
+    console.log(`  msgmon session start --workspace=${workspaceId} --agent-command='codex .'`)
+    console.log("Auth token is auto-generated in .msgmon/serve.json and read by session.")
   } finally {
     rl.close()
   }
