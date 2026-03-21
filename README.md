@@ -16,6 +16,38 @@ To remove the global link:
 npm unlink -g msgmon
 ```
 
+## Quick Start: Agent Setup
+
+The recommended way to run an agent is with three processes across two directories. The **project directory** (where you cloned msgmon) holds credentials and runs the server. The **agent directory** is an isolated folder that receives only workspace data — no secrets, no tokens, no credentials.
+
+```bash
+# 1. Install and run interactive setup (project directory)
+npm install && npm link
+msgmon setup                       # walks through Gmail/Slack auth, workspace creation, and seeding
+
+# 2. Start the server (project directory — keeps running)
+msgmon serve
+
+# 3. Start the agent session in an isolated directory (separate terminal)
+mkdir -p /tmp/agent-sandbox
+msgmon session start \
+  --workspace=default \
+  --dir=/tmp/agent-sandbox \
+  --watch \
+  --agent-command='codex .'
+```
+
+The `--dir` flag places the agent's working copy outside the project tree. The agent sees only the workspace snapshot files (`inbox/`, `workspace.json`, `instructions.md`, `drafts/`, etc.) and a `.msgmon-session/` folder with sync metadata. It never sees OAuth tokens, `credentials.json`, or `serve.json`.
+
+New messages reach the agent through periodic refresh. Either:
+
+- Run `msgmon workspace refresh default` on a cron / in a loop, or
+- Have the agent call `POST /api/workspace/refresh` via the server API
+
+The `--watch` flag on `session start` syncs file changes between the server and agent directory on an interval, so refreshed messages appear automatically.
+
+To add more accounts later, re-run `msgmon setup` — it skips completed steps and prompts to add additional Gmail or Slack accounts.
+
 ## Gmail Setup (OAuth)
 
 1. In Google Cloud, create/select a project, enable `Gmail API`, configure the OAuth consent screen, and create an OAuth Client ID (Desktop app).
