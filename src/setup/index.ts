@@ -264,7 +264,7 @@ let checkSlack = async (): Promise<boolean> => {
   let hasAny = existing.length > 0
   let promptMsg = hasAny ? "Add another Slack account?" : "Set up Slack integration?"
 
-  if (!await confirm(promptMsg, false)) {
+  if (!await confirm(promptMsg, !hasAny)) {
     if (!hasAny) skip("Skipping Slack setup.")
     return true
   }
