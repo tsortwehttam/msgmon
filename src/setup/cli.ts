@@ -8,16 +8,18 @@ import { runSetup } from "./index"
 export let configureSetupCli = (cli: Argv) =>
   cli
     .usage("Usage: $0 [dir] [options]")
-    .positional("dir", {
-      type: "string",
-      describe: "Workspace directory to initialize (defaults to current directory)",
-    })
-    .option("workspace", {
-      type: "string",
-      default: "default",
-      hidden: true,
-      describe: "Internal workspace id to create/verify",
-    })
+    .command("$0 [dir]", false, y =>
+      y
+        .positional("dir", {
+          type: "string",
+          describe: "Workspace directory to initialize (defaults to current directory)",
+        })
+        .option("workspace", {
+          type: "string",
+          default: "default",
+          hidden: true,
+          describe: "Internal workspace id to create/verify",
+        }))
     .example("$0", "Interactive guided setup in the current directory")
     .example("$0 ./assistant-workspace", "Create the directory if needed and set it up as a workspace")
     .epilog(
@@ -33,13 +35,14 @@ export let configureSetupCli = (cli: Argv) =>
         "Safe to re-run — skips steps that are already done.",
       ].join("\n"),
     )
+    .demandCommand(0)
     .strict()
     .help()
 
 export let parseSetupCli = async (args: string[], scriptName = "msgmon setup") => {
   let argv = await configureSetupCli(yargs(args).scriptName(scriptName)).parseAsync()
-  let dir = path.resolve(argv.dir ?? ".")
+  let dir = path.resolve((argv.dir as string | undefined) ?? ".")
   fs.mkdirSync(dir, { recursive: true })
   setWorkspaceDir(dir)
-  await runSetup({ workspace: argv.workspace })
+  await runSetup({ workspace: argv.workspace as string | undefined })
 }
