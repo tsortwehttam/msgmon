@@ -321,9 +321,10 @@ let pickSlackChannels = async (): Promise<string[]> => {
     }
 
     if (memberChannels.length === 0) {
-      info("No Slack channels found that the bot is a member of.")
-      info("Invite the bot to channels first, then re-run setup.")
-      return []
+      fail("No Slack channels found that the bot is a member of.")
+      console.log("Invite the bot to some channels in Slack, then press Enter to retry.")
+      await prompt("Press Enter to retry...")
+      return pickSlackChannels()
     }
 
     let names = memberChannels.map(c => `#${c.name}`)
@@ -335,7 +336,10 @@ let pickSlackChannels = async (): Promise<string[]> => {
 
     let input = await prompt("Enter channels to monitor (comma-separated, e.g. #general,#engineering): ")
     let picked = input.split(",").map(s => s.trim()).filter(Boolean)
-    return picked.length > 0 ? picked : []
+    if (picked.length > 0) return picked
+
+    console.log("No channels entered.")
+    return pickSlackChannels()
   } catch (err) {
     let msg = err instanceof Error ? err.message : String(err)
     fail(`Could not list Slack channels: ${msg}`)
