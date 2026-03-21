@@ -301,34 +301,32 @@ let pickSlackChannels = async (): Promise<string[]> => {
     let clients = slackClients(accountName)
     let bot = clients.bot
 
-    // Fetch channels the bot is a member of
-    let memberChannels: Array<{ id: string; name: string }> = []
+    // Fetch all public channels in the workspace
+    let channels: Array<{ id: string; name: string }> = []
     let cursor: string | undefined
     while (true) {
       let res = await bot.conversations.list({
-        types: "public_channel,private_channel",
+        types: "public_channel",
         limit: 1000,
         exclude_archived: true,
         cursor,
       })
       for (let ch of res.channels ?? []) {
-        if (ch.id && ch.name && ch.is_member) {
-          memberChannels.push({ id: ch.id, name: ch.name })
+        if (ch.id && ch.name) {
+          channels.push({ id: ch.id, name: ch.name })
         }
       }
       cursor = res.response_metadata?.next_cursor || undefined
       if (!cursor) break
     }
 
-    if (memberChannels.length === 0) {
-      fail("No Slack channels found that the bot is a member of.")
-      console.log("Invite the bot to some channels in Slack, then press Enter to retry.")
-      await prompt("Press Enter to retry...")
-      return pickSlackChannels()
+    if (channels.length === 0) {
+      fail("No Slack channels found in this workspace.")
+      return []
     }
 
-    let names = memberChannels.map(c => `#${c.name}`)
-    console.log(`Slack channels the bot is in: ${names.join(", ")}`)
+    let names = channels.map(c => `#${c.name}`)
+    console.log(`Found ${channels.length} channels: ${names.join(", ")}`)
 
     if (await confirm("Monitor all of these channels?", true)) {
       return names
