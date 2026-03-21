@@ -161,6 +161,25 @@ let isWritablePath = (relPath: string) =>
   || relPath === "AGENTS.md"
   || relPath.startsWith("drafts/")
 
+let MANAGED_FILE_PATHS = ["workspace.json", "AGENTS.md", "status.md"] as const
+let MANAGED_DIR_PATHS = [...WORKSPACE_DIRS, LOCAL_CONFIG_DIRNAME] as const
+
+let ensureWorkspaceLayoutCompatible = (root: string) => {
+  for (let dir of MANAGED_DIR_PATHS) {
+    let target = path.resolve(root, dir)
+    if (fs.existsSync(target) && !fs.statSync(target).isDirectory()) {
+      throw new Error(`Cannot initialize workspace: "${target}" exists and is not a directory`)
+    }
+  }
+
+  for (let file of MANAGED_FILE_PATHS) {
+    let target = path.resolve(root, file)
+    if (fs.existsSync(target) && !fs.statSync(target).isFile()) {
+      throw new Error(`Cannot initialize workspace: "${target}" exists and is not a file`)
+    }
+  }
+}
+
 let validateWorkspaceDraftFile = (relPath: string, content: string) => {
   if (!relPath.startsWith("drafts/") || !relPath.endsWith(".json")) return
   let draft = Draft.parse(JSON.parse(content))
@@ -225,11 +244,12 @@ export let initWorkspace = (
   let root = workspaceRoot(id)
 
   if (fs.existsSync(root)) {
-    let entries = fs.readdirSync(root).filter(entry => entry !== LOCAL_CONFIG_DIRNAME)
-    if (entries.length > 0 && !options.overwrite) {
-      throw new Error(`Workspace directory "${root}" already exists and is not empty`)
+    ensureWorkspaceLayoutCompatible(root)
+    if (options.overwrite) {
+      for (let relPath of [...MANAGED_FILE_PATHS, ...MANAGED_DIR_PATHS]) {
+        removePathIfExists(path.resolve(root, relPath))
+      }
     }
-    if (entries.length > 0 && options.overwrite) removePathIfExists(root)
   }
 
   fs.mkdirSync(root, { recursive: true })
@@ -253,8 +273,12 @@ export let initWorkspace = (
   }
 
   fs.writeFileSync(path.resolve(root, "workspace.json"), JSON.stringify(config, null, 2) + "\n")
-  fs.writeFileSync(path.resolve(root, "AGENTS.md"), DEFAULT_AGENTS)
-  fs.writeFileSync(path.resolve(root, "status.md"), DEFAULT_STATUS)
+  if (!fs.existsSync(path.resolve(root, "AGENTS.md"))) {
+    fs.writeFileSync(path.resolve(root, "AGENTS.md"), DEFAULT_AGENTS)
+  }
+  if (!fs.existsSync(path.resolve(root, "status.md"))) {
+    fs.writeFileSync(path.resolve(root, "status.md"), DEFAULT_STATUS)
+  }
 
   return { path: root, config }
 }
@@ -336,9 +360,8 @@ export let importWorkspaceBundle = (params: {
 
   let workspaceId = ensureSafeWorkspaceId(params.workspaceId ?? bundle.workspaceId ?? DEFAULT_WORKSPACE_ID)
   let root = workspaceRoot(workspaceId)
-  if (fs.existsSync(root) && !params.overwrite) {
-    let entries = fs.readdirSync(root).filter(entry => entry !== LOCAL_CONFIG_DIRNAME)
-    if (entries.length > 0) throw new Error(`Workspace directory "${root}" already exists and is not empty`)
+  if (fs.existsSync(root)) {
+    ensureWorkspaceLayoutCompatible(root)
   }
 
   initWorkspace(workspaceId, {

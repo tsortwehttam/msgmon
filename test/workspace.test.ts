@@ -79,6 +79,26 @@ describe("workspace store", () => {
     assert.ok(!paths.some(file => file.startsWith(".msgmon/")))
   })
 
+  it("initializes gracefully inside an existing non-empty directory", () => {
+    let dir = useDir("existing-dir")
+    fs.writeFileSync(path.join(dir, "notes.txt"), "keep me\n")
+    fs.writeFileSync(path.join(dir, "AGENTS.md"), "# Existing\n")
+
+    let result = workspaceStore.initWorkspace("default", {
+      name: "Existing Dir Workspace",
+      accounts: ["default"],
+      query: "is:unread",
+    })
+
+    assert.equal(result.path, dir)
+    assert.match(fs.readFileSync(path.join(dir, "notes.txt"), "utf8"), /keep me/)
+    assert.match(fs.readFileSync(path.join(dir, "AGENTS.md"), "utf8"), /# Existing/)
+    assert.ok(fs.existsSync(path.join(dir, "workspace.json")))
+    assert.ok(fs.existsSync(path.join(dir, "status.md")))
+    assert.ok(fs.existsSync(path.join(dir, "inbox")))
+    assert.ok(fs.existsSync(path.join(dir, ".msgmon", "state")))
+  })
+
   it("applies bounded pushes, validates drafts, and detects stale revisions", () => {
     useDir("beta")
     workspaceStore.initWorkspace("beta")
