@@ -4,6 +4,7 @@ import crypto from "node:crypto"
 import zlib from "node:zlib"
 import { z } from "zod"
 import { PWD_CONFIG_DIR } from "../CliConfig"
+import { DEFAULT_GMAIL_WORKSPACE_QUERY } from "../defaults"
 import { Draft } from "../draft/schema"
 
 export interface WorkspaceConfig {
@@ -11,6 +12,9 @@ export interface WorkspaceConfig {
   name: string
   accounts: string[]
   query: string
+  contextWindowDays: number
+  contextMaxResults: number
+  contextQuery?: string
   slackChannels?: string[]
   createdAt: string
   updatedAt: string
@@ -36,7 +40,7 @@ export type WorkspaceBundle = {
   files: WorkspaceExportFile[]
 }
 
-let WORKSPACE_DIRS = ["inbox", "drafts", "corpus"] as const
+let WORKSPACE_DIRS = ["inbox", "context", "drafts"] as const
 let SERVER_DIRNAME = ".server"
 
 let DEFAULT_INSTRUCTIONS = `# Agent Instructions
@@ -53,13 +57,13 @@ instructions.md     — this file
 user-profile.md     — user identity, contacts, preferences
 status.md           — working summary maintained by the agent
 inbox/              — ingested messages (read-only input)
+context/            — historical reference messages (read-only input)
 drafts/             — draft JSON files the agent may create/update/delete
-corpus/             — optional derived artifacts for retrieval
 \`\`\`
 
 ## Operating Model
 
-1. Read messages from \`inbox/\` and update \`status.md\`.
+1. Read messages from \`inbox/\` and \`context/\` and update \`status.md\`.
 2. Create or revise draft JSON files under \`drafts/\`.
 3. Do not assume any local command can safely send or mutate remote state.
 4. Privileged actions such as send, mark-read, or archive must go back through
@@ -68,7 +72,9 @@ corpus/             — optional derived artifacts for retrieval
 ## Rules
 
 - Never send a message without explicit user approval.
-- Treat \`workspace.json\` and \`inbox/\` as read-only.
+- Treat \`workspace.json\`, \`inbox/\`, and \`context/\` as read-only.
+- \`inbox/\` contains newly ingested actionable messages.
+- \`context/\` contains system-managed historical reference material.
 - Keep \`status.md\` concise and current.
 - Prefer editing existing drafts over creating duplicates.
 `
@@ -114,6 +120,9 @@ let WorkspaceConfigSchema = z.object({
   name: z.string().min(1),
   accounts: z.array(z.string()).min(1),
   query: z.string(),
+  contextWindowDays: z.number().int().min(1).default(14),
+  contextMaxResults: z.number().int().min(1).default(200),
+  contextQuery: z.string().optional(),
   slackChannels: z.array(z.string()).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -153,14 +162,12 @@ let isWritablePath = (relPath: string) =>
   || relPath === "instructions.md"
   || relPath === "user-profile.md"
   || relPath.startsWith("drafts/")
-  || relPath.startsWith("corpus/")
 
 let validateWorkspaceDraftFile = (relPath: string, content: string) => {
   if (!relPath.startsWith("drafts/") || !relPath.endsWith(".json")) return
   let draft = Draft.parse(JSON.parse(content))
-  let expected = `drafts/${draft.id}.json`
-  if (relPath !== expected) {
-    throw new Error(`Draft file path must match draft id (${expected})`)
+  if (!relPath.endsWith(`_${draft.id}.json`)) {
+    throw new Error(`Draft file path must end with _${draft.id}.json`)
   }
 }
 
@@ -205,7 +212,16 @@ let computeRevision = (files: WorkspaceExportFile[]) => {
 
 export let initWorkspace = (
   workspaceId: string,
-  options: { name?: string; accounts?: string[]; query?: string; slackChannels?: string[]; overwrite?: boolean } = {},
+  options: {
+    name?: string
+    accounts?: string[]
+    query?: string
+    contextWindowDays?: number
+    contextMaxResults?: number
+    contextQuery?: string
+    slackChannels?: string[]
+    overwrite?: boolean
+  } = {},
 ) => {
   let id = ensureSafeWorkspaceId(workspaceId)
   let root = workspaceRoot(id)
@@ -229,7 +245,10 @@ export let initWorkspace = (
     id,
     name: options.name ?? id,
     accounts: options.accounts ?? ["default"],
-    query: options.query ?? "is:unread",
+    query: options.query ?? DEFAULT_GMAIL_WORKSPACE_QUERY,
+    contextWindowDays: options.contextWindowDays ?? 14,
+    contextMaxResults: options.contextMaxResults ?? 200,
+    contextQuery: options.contextQuery?.trim() || undefined,
     slackChannels: options.slackChannels?.length ? options.slackChannels : undefined,
     createdAt: now,
     updatedAt: now,
@@ -332,6 +351,9 @@ export let importWorkspaceBundle = (params: {
     name: bundle.config.name,
     accounts: bundle.config.accounts,
     query: bundle.config.query,
+    contextWindowDays: bundle.config.contextWindowDays,
+    contextMaxResults: bundle.config.contextMaxResults,
+    contextQuery: bundle.config.contextQuery,
     overwrite: params.overwrite,
   })
   writeSnapshotFiles(workspaceId, bundle.files)

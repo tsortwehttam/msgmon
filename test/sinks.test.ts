@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { createNdjsonSink, createDirSink, createExecSink } from "../src/ingest/sinks"
+import { createNdjsonSink, createJsonFileSink, createExecSink } from "../src/ingest/sinks"
 import type { UnifiedMessage } from "../src/types"
 
 let tmpDir: string
@@ -62,53 +62,48 @@ describe("createNdjsonSink", () => {
   })
 })
 
-describe("createDirSink", () => {
-  it("creates a directory per message with unified.json", async () => {
+describe("createJsonFileSink", () => {
+  it("creates one json file per message", async () => {
     let outDir = path.join(tmpDir, "inbox")
-    let sink = createDirSink({ outDir })
+    let sink = createJsonFileSink({ outDir })
 
     await sink.write(sampleMessage())
 
     let entries = fs.readdirSync(outDir)
     assert.equal(entries.length, 1)
+    assert.match(entries[0], /^2024-01-15T10-30-00-000Z_msg-001\.json$/)
 
-    let msgDir = path.join(outDir, entries[0])
-    assert.ok(fs.existsSync(path.join(msgDir, "unified.json")))
-
-    let unified = JSON.parse(fs.readFileSync(path.join(msgDir, "unified.json"), "utf8"))
+    let unified = JSON.parse(fs.readFileSync(path.join(outDir, entries[0]), "utf8"))
     assert.equal(unified.id, "msg-001")
     assert.equal(unified.subject, "Test subject")
   })
 
-  it("writes body.txt and body.html", async () => {
+  it("stores body fields in the json payload", async () => {
     let outDir = path.join(tmpDir, "inbox")
-    let sink = createDirSink({ outDir })
+    let sink = createJsonFileSink({ outDir })
 
     await sink.write(sampleMessage())
 
     let entries = fs.readdirSync(outDir)
-    let msgDir = path.join(outDir, entries[0])
-
-    assert.equal(fs.readFileSync(path.join(msgDir, "body.txt"), "utf8"), "Hello world")
-    assert.equal(fs.readFileSync(path.join(msgDir, "body.html"), "utf8"), "<p>Hello world</p>")
+    let unified = JSON.parse(fs.readFileSync(path.join(outDir, entries[0]), "utf8"))
+    assert.equal(unified.bodyText, "Hello world")
+    assert.equal(unified.bodyHtml, "<p>Hello world</p>")
   })
 
-  it("writes headers.json for mail platform", async () => {
+  it("stores headers in the unified payload", async () => {
     let outDir = path.join(tmpDir, "inbox")
-    let sink = createDirSink({ outDir })
+    let sink = createJsonFileSink({ outDir })
 
     await sink.write(sampleMessage())
 
     let entries = fs.readdirSync(outDir)
-    let msgDir = path.join(outDir, entries[0])
-
-    let headers = JSON.parse(fs.readFileSync(path.join(msgDir, "headers.json"), "utf8"))
-    assert.equal(headers.subject, "Test subject")
+    let unified = JSON.parse(fs.readFileSync(path.join(outDir, entries[0]), "utf8"))
+    assert.equal(unified.platformMetadata.headers.subject, "Test subject")
   })
 
-  it("creates unique directories for different messages", async () => {
+  it("creates unique files for different messages", async () => {
     let outDir = path.join(tmpDir, "inbox")
-    let sink = createDirSink({ outDir })
+    let sink = createJsonFileSink({ outDir })
 
     await sink.write(sampleMessage("msg-001"))
     await sink.write(sampleMessage("msg-002"))
@@ -117,9 +112,9 @@ describe("createDirSink", () => {
     assert.equal(entries.length, 2)
   })
 
-  it("creates attachments dir when saveAttachments is true and fetchAttachment is provided", async () => {
+  it("keeps attachments in the json payload even when saveAttachments is true", async () => {
     let outDir = path.join(tmpDir, "inbox")
-    let sink = createDirSink({
+    let sink = createJsonFileSink({
       outDir,
       saveAttachments: true,
       fetchAttachment: async () => Buffer.from("fake-pdf-content"),
@@ -128,13 +123,9 @@ describe("createDirSink", () => {
     await sink.write(sampleMessage())
 
     let entries = fs.readdirSync(outDir)
-    let msgDir = path.join(outDir, entries[0])
-    let attDir = path.join(msgDir, "attachments")
-
-    assert.ok(fs.existsSync(attDir))
-    let attFiles = fs.readdirSync(attDir)
-    assert.equal(attFiles.length, 1)
-    assert.equal(fs.readFileSync(path.join(attDir, attFiles[0]), "utf8"), "fake-pdf-content")
+    let unified = JSON.parse(fs.readFileSync(path.join(outDir, entries[0]), "utf8"))
+    assert.equal(unified.attachments.length, 1)
+    assert.equal(unified.attachments[0].filename, "report.pdf")
   })
 })
 

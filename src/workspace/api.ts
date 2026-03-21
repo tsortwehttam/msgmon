@@ -93,6 +93,10 @@ export let createWorkspaceHandlers = (opts: WorkspaceApiOptions): Record<string,
       markRead: p.markRead,
       saveAttachments: p.saveAttachments,
       seed: p.seed,
+      syncContext: p.syncContext,
+      contextMaxResults: p.contextMaxResults,
+      contextSince: p.contextSince,
+      clearContext: p.clearContext,
       verbose: false,
     })
     return { status: 200, data: { workspaceId: p.workspaceId, ...result } }
@@ -121,6 +125,9 @@ export let createWorkspaceHandlers = (opts: WorkspaceApiOptions): Record<string,
         name: v.data.name,
         accounts: v.data.accounts,
         query: v.data.query,
+        contextWindowDays: v.data.contextWindowDays,
+        contextMaxResults: v.data.contextMaxResults,
+        contextQuery: v.data.contextQuery,
         overwrite: v.data.overwrite,
       })
       return { status: 200, data: { workspaceId: result.config.id, config: result.config, path: result.path } }

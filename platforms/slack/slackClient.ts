@@ -18,6 +18,38 @@ export type SlackClients = {
   tokenFile: SlackTokenFile
 }
 
+export let slackReadClient = (clients: SlackClients) => clients.user ?? clients.bot
+
+let isSlackNotInChannelError = (err: unknown) => {
+  let message = err instanceof Error ? err.message : String(err)
+  return message.includes("not_in_channel")
+}
+
+export let postMessageWithJoinFallback = async (params: {
+  clients: SlackClients
+  sendClient: WebClient
+  channelId: string
+  text: string
+  threadTs?: string
+}) => {
+  try {
+    return await params.sendClient.chat.postMessage({
+      channel: params.channelId,
+      text: params.text,
+      thread_ts: params.threadTs,
+    })
+  } catch (err) {
+    // Only retry for bot-token sends that can join public channels on demand.
+    if (params.sendClient !== params.clients.bot || !isSlackNotInChannelError(err)) throw err
+    await params.clients.bot.conversations.join({ channel: params.channelId })
+    return await params.clients.bot.chat.postMessage({
+      channel: params.channelId,
+      text: params.text,
+      thread_ts: params.threadTs,
+    })
+  }
+}
+
 export let loadSlackTokenFile = (account: string): SlackTokenFile => {
   let tokenPath = resolveTokenReadPathForAccount(account, "slack")
   let raw = JSON.parse(fs.readFileSync(tokenPath, "utf8"))

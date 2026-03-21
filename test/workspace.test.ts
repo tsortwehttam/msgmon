@@ -50,16 +50,21 @@ describe("workspace store", () => {
     })
 
     assert.equal(result.config.id, "alpha")
+    assert.equal(result.config.contextWindowDays, 14)
+    assert.equal(result.config.contextMaxResults, 200)
     assert.ok(fs.existsSync(path.join(result.path, "workspace.json")))
     assert.ok(fs.existsSync(path.join(result.path, "inbox")))
+    assert.ok(fs.existsSync(path.join(result.path, "context")))
     assert.ok(fs.existsSync(path.join(result.path, ".server", "state")))
 
     fs.writeFileSync(path.join(result.path, ".server", "secret.txt"), "do not export")
+    fs.writeFileSync(path.join(result.path, "context", "note.txt"), "history")
 
     let snapshot = workspaceStore.exportWorkspaceSnapshot("alpha")
     let paths = snapshot.files.map(file => file.path)
     assert.ok(paths.includes("workspace.json"))
     assert.ok(paths.includes("status.md"))
+    assert.ok(paths.includes("context/note.txt"))
     assert.ok(!paths.some(file => file.startsWith(".server/")))
   })
 
@@ -67,13 +72,15 @@ describe("workspace store", () => {
     workspaceStore.initWorkspace("beta")
     let initial = workspaceStore.exportWorkspaceSnapshot("beta")
     let updatedStatus = Buffer.from("# Status\n\nUpdated\n", "utf8").toString("base64")
-    let draft = Buffer.from(JSON.stringify(makeDraft("draft-1"), null, 2) + "\n", "utf8").toString("base64")
+    let draftRecord = makeDraft("draft-1")
+    let draftPath = `drafts/${draftStore.draftFileName(draftRecord)}`
+    let draft = Buffer.from(JSON.stringify(draftRecord, null, 2) + "\n", "utf8").toString("base64")
 
     let pushed = workspaceStore.applyWorkspacePush("beta", {
       baseRevision: initial.revision,
       files: [
         { path: "status.md", contentBase64: updatedStatus },
-        { path: "drafts/draft-1.json", contentBase64: draft },
+        { path: draftPath, contentBase64: draft },
       ],
     })
 
@@ -137,7 +144,7 @@ describe("workspace API handlers", () => {
       workspaceId: "gamma",
       baseRevision: revision,
       files: [{
-        path: "drafts/draft-2.json",
+        path: `drafts/${draftStore.draftFileName(makeDraft("draft-2"))}`,
         contentBase64: Buffer.from(JSON.stringify(makeDraft("draft-2"), null, 2) + "\n", "utf8").toString("base64"),
       }],
     })

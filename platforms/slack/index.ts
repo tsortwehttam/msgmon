@@ -18,7 +18,7 @@ import path from "node:path"
 import yargs from "yargs"
 import type { Argv } from "yargs"
 import { DEFAULT_ACCOUNT } from "../../src/CliConfig"
-import { slackClients, uploadFilesToChannel } from "./slackClient"
+import { slackClients, slackReadClient, uploadFilesToChannel, postMessageWithJoinFallback } from "./slackClient"
 import { toUnifiedMessage, type UserCache } from "./toUnifiedMessage"
 import type { SlackMessage } from "./toUnifiedMessage"
 
@@ -37,25 +37,35 @@ export let configureSlackCli = (cli: Argv) =>
       describe: "Print diagnostic details to stderr",
     })
     .command(
-      "auth",
+      "auth [args..]",
       "Store a bot token or run Slack OAuth install flow",
-      y => y,
+      y =>
+        y
+          .parserConfiguration({ "unknown-options-as-args": true })
+          .positional("args", {
+            type: "string",
+            array: true,
+            describe: "Arguments forwarded to `msgmon slack auth`",
+          }),
       async argv => {
-        // Dynamically import to avoid loading auth deps when not needed
         let { parseAuthCli } = await import("./auth")
-        // Forward raw args minus the "auth" command itself
-        let rawArgs = process.argv.slice(process.argv.indexOf("auth") + 1)
-        await parseAuthCli(rawArgs)
+        await parseAuthCli((argv.args as string[] | undefined) ?? [], "msgmon slack auth")
       },
     )
     .command(
-      "accounts",
+      "accounts [args..]",
       "List configured Slack workspaces",
-      y => y,
+      y =>
+        y
+          .parserConfiguration({ "unknown-options-as-args": true })
+          .positional("args", {
+            type: "string",
+            array: true,
+            describe: "Arguments forwarded to `msgmon slack accounts`",
+          }),
       async argv => {
         let { parseAccountsCli } = await import("./accounts")
-        let rawArgs = process.argv.slice(process.argv.indexOf("accounts") + 1)
-        await parseAccountsCli(rawArgs)
+        await parseAccountsCli((argv.args as string[] | undefined) ?? [], "msgmon slack accounts")
       },
     )
     .command(
@@ -107,12 +117,13 @@ export let configureSlackCli = (cli: Argv) =>
           .positional("ts", { type: "string", demandOption: true, describe: "Message timestamp" }),
       async argv => {
         let clients = slackClients(argv.account, argv.verbose)
+        let reader = slackReadClient(clients)
 
         // Resolve channel name to ID if needed
         let channelId = argv.channel!
         let channelName = argv.channel!
         if (channelId.startsWith("#")) {
-          let res = await clients.bot.conversations.list({
+          let res = await reader.conversations.list({
             types: "public_channel,private_channel",
             limit: 1000,
           })
@@ -122,7 +133,7 @@ export let configureSlackCli = (cli: Argv) =>
           channelId = match.id
         }
 
-        let res = await clients.bot.conversations.history({
+        let res = await reader.conversations.history({
           channel: channelId,
           latest: argv.ts,
           inclusive: true,
@@ -138,7 +149,7 @@ export let configureSlackCli = (cli: Argv) =>
         let userCache: UserCache = new Map()
         if (msg.user) {
           try {
-            let u = await clients.bot.users.info({ user: msg.user })
+            let u = await reader.users.info({ user: msg.user })
             let name = u.user?.profile?.display_name || u.user?.profile?.real_name || u.user?.name
             if (name) userCache.set(msg.user, name)
           } catch { /* proceed without name */ }
@@ -191,6 +202,7 @@ export let configureSlackCli = (cli: Argv) =>
           }),
       async argv => {
         let clients = slackClients(argv.account, argv.verbose)
+        let reader = slackReadClient(clients)
 
         // Prefer user token for sending as user, fall back to bot
         let sendClient = argv.asUser && clients.user ? clients.user : clients.bot
@@ -198,7 +210,7 @@ export let configureSlackCli = (cli: Argv) =>
         // Resolve channel name
         let channelId = argv.channel
         if (channelId.startsWith("#")) {
-          let res = await clients.bot.conversations.list({
+          let res = await reader.conversations.list({
             types: "public_channel,private_channel",
             limit: 1000,
           })
@@ -210,10 +222,12 @@ export let configureSlackCli = (cli: Argv) =>
         // Send text message if present
         let messageResult: { ok?: boolean; ts?: string; channel?: string } | null = null
         if (argv.text) {
-          let res = await sendClient.chat.postMessage({
-            channel: channelId,
+          let res = await postMessageWithJoinFallback({
+            clients,
+            sendClient,
+            channelId,
             text: argv.text,
-            thread_ts: argv.threadTs,
+            threadTs: argv.threadTs,
           })
           messageResult = { ok: res.ok, ts: res.ts, channel: res.channel }
         }

@@ -1,6 +1,6 @@
 import { gmailClient } from "../../platforms/gmail/MailSource"
 import { base64url, buildRawMessage } from "../../platforms/gmail/mail"
-import { slackClients, uploadFilesToChannel } from "../../platforms/slack/slackClient"
+import { slackClients, slackReadClient, uploadFilesToChannel, postMessageWithJoinFallback } from "../../platforms/slack/slackClient"
 import type { Draft } from "./schema"
 
 let resolveSlackChannelId = async (
@@ -46,15 +46,18 @@ export let sendDraft = async (draft: Draft): Promise<unknown> => {
 
   if (draft.platform === "slack") {
     let clients = slackClients(draft.account)
+    let reader = slackReadClient(clients)
     let sendClient = draft.asUser && clients.user ? clients.user : clients.bot
-    let channelId = await resolveSlackChannelId(clients.bot, draft.channel)
+    let channelId = await resolveSlackChannelId(reader, draft.channel)
 
     let messageResult: { ok?: boolean; ts?: string; channel?: string } | null = null
     if (draft.text) {
-      let r = await sendClient.chat.postMessage({
-        channel: channelId,
+      let r = await postMessageWithJoinFallback({
+        clients,
+        sendClient,
+        channelId,
         text: draft.text,
-        thread_ts: draft.threadTs,
+        threadTs: draft.threadTs,
       })
       messageResult = { ok: r.ok, ts: r.ts, channel: r.channel }
     }

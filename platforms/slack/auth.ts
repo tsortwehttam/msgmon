@@ -50,8 +50,9 @@ let authBot = async (account: string, token: string, verbose = false) => {
 let SLACK_OAUTH_AUTHORIZE_URL = "https://slack.com/oauth/v2/authorize"
 let OAUTH_REDIRECT_URI = "https://tsortwehttam.github.io/msgmon/oauth"
 
-export let BOT_SCOPES = [
+export let BOT_SCOPE_LIST = [
   "channels:history",
+  "channels:join",
   "channels:read",
   "groups:history",
   "groups:read",
@@ -59,12 +60,21 @@ export let BOT_SCOPES = [
   "mpim:history",
   "users:read",
   "chat:write",
-].join(",")
+]
+export let BOT_SCOPES = BOT_SCOPE_LIST.join(",")
 
-export let USER_SCOPES = [
+export let USER_SCOPE_LIST = [
+  "channels:history",
+  "channels:read",
+  "groups:history",
+  "groups:read",
+  "im:history",
+  "mpim:history",
+  "users:read",
   "search:read",
   "chat:write",
-].join(",")
+]
+export let USER_SCOPES = USER_SCOPE_LIST.join(",")
 
 let openBrowser = (url: string) => {
   let cmd = process.platform === "darwin" ? "open"

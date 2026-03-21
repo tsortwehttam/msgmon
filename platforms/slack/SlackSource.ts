@@ -1,5 +1,5 @@
 import type { WebClient } from "@slack/web-api"
-import { slackClients } from "./slackClient"
+import { slackClients, slackReadClient } from "./slackClient"
 import type { MessageSource } from "../../src/ingest/ingest"
 import type { UnifiedMessage } from "../../src/types"
 import { toUnifiedMessage, type UserCache } from "./toUnifiedMessage"
@@ -82,6 +82,13 @@ let populateUserCache = async (
   if (uncached.length) verboseLog(verbose, "resolved users", { count: uncached.length })
 }
 
+let toSlackTsBound = (value?: string) => {
+  if (!value) return undefined
+  let ms = Date.parse(value)
+  if (!Number.isFinite(ms)) throw new Error(`Invalid time bound "${value}"`)
+  return String(ms / 1000)
+}
+
 // ---------------------------------------------------------------------------
 // MessageSource implementation
 // ---------------------------------------------------------------------------
@@ -89,7 +96,7 @@ let populateUserCache = async (
 export let slackSource: MessageSource = {
   async *listMessages(params) {
     let clients = slackClients(params.account, params.verbose)
-    let bot = clients.bot
+    let reader = slackReadClient(clients)
 
     // Parse query as comma-separated channel names/IDs
     let channelQueries = (params.query || "")
@@ -102,7 +109,7 @@ export let slackSource: MessageSource = {
       return
     }
 
-    let channels = await resolveChannelIds(bot, channelQueries, params.verbose)
+    let channels = await resolveChannelIds(reader, channelQueries, params.verbose)
     let userCache: UserCache = new Map()
     let yielded = 0
 
@@ -114,45 +121,65 @@ export let slackSource: MessageSource = {
         id: channel.id,
       })
 
-      let cursor: string | undefined
-      while (yielded < params.maxResults) {
-        let res = await bot.conversations.history({
-          channel: channel.id,
-          limit: Math.min(params.maxResults - yielded, 200),
-          cursor,
-        })
-
-        let messages = res.messages ?? []
-        verboseLog(params.verbose, "slack page", {
-          channel: channel.name,
-          fetched: messages.length,
-          hasMore: res.has_more,
-        })
-
-        // Batch-resolve user IDs for this page
-        let userIds = new Set<string>()
-        for (let m of messages) {
-          if (m.user) userIds.add(m.user)
-        }
-        await populateUserCache(bot, userIds, userCache, params.verbose)
-
-        for (let msg of messages) {
-          if (yielded >= params.maxResults) return
-          // Skip non-message subtypes we don't care about
-          if (msg.subtype === "channel_join" || msg.subtype === "channel_leave") continue
-          if (!msg.ts) continue
-
-          yield toUnifiedMessage(msg as import("./toUnifiedMessage").SlackMessage, {
-            channelId: channel.id,
-            channelName: channel.name,
-            teamId: clients.teamId ?? "",
-            userCache,
+      try {
+        let cursor: string | undefined
+        let oldest = toSlackTsBound(params.oldest)
+        let latest = toSlackTsBound(params.latest)
+        while (yielded < params.maxResults) {
+          let res = await reader.conversations.history({
+            channel: channel.id,
+            limit: Math.min(params.maxResults - yielded, 200),
+            oldest,
+            latest,
+            inclusive: true,
+            cursor,
           })
-          yielded += 1
-        }
 
-        cursor = res.response_metadata?.next_cursor || undefined
-        if (!cursor || !res.has_more) break
+          let messages = res.messages ?? []
+          verboseLog(params.verbose, "slack page", {
+            channel: channel.name,
+            fetched: messages.length,
+            hasMore: res.has_more,
+            oldest,
+            latest,
+          })
+
+          // Batch-resolve user IDs for this page
+          let userIds = new Set<string>()
+          for (let m of messages) {
+            if (m.user) userIds.add(m.user)
+          }
+          await populateUserCache(reader, userIds, userCache, params.verbose)
+
+          for (let msg of messages) {
+            if (yielded >= params.maxResults) return
+            // Skip non-message subtypes we don't care about
+            if (msg.subtype === "channel_join" || msg.subtype === "channel_leave") continue
+            if (!msg.ts) continue
+
+            yield toUnifiedMessage(msg as import("./toUnifiedMessage").SlackMessage, {
+              channelId: channel.id,
+              channelName: channel.name,
+              teamId: clients.teamId ?? "",
+              userCache,
+            })
+            yielded += 1
+          }
+
+          cursor = res.response_metadata?.next_cursor || undefined
+          if (!cursor || !res.has_more) break
+        }
+      } catch (err) {
+        let message = err instanceof Error ? err.message : String(err)
+        if (message.includes("not_in_channel")) {
+          verboseLog(params.verbose, "skipping unreadable slack channel", {
+            channel: channel.name,
+            id: channel.id,
+            reason: message,
+          })
+          continue
+        }
+        throw err
       }
     }
   },

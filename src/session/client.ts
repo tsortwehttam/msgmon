@@ -18,6 +18,9 @@ export type WorkspaceSnapshot = {
     name: string
     accounts: string[]
     query: string
+    contextWindowDays: number
+    contextMaxResults: number
+    contextQuery?: string
     createdAt: string
     updatedAt: string
   }
@@ -81,7 +84,6 @@ let writablePath = (relPath: string) =>
   || relPath === "instructions.md"
   || relPath === "user-profile.md"
   || relPath.startsWith("drafts/")
-  || relPath.startsWith("corpus/")
 
 let exportablePath = (relPath: string) => !(relPath.split("/")[0] ?? "").startsWith(".")
 
@@ -393,6 +395,19 @@ export let startSession = async (params: {
 }) => {
   let dir = path.resolve(params.dir ?? defaultSessionDir(params.workspaceId))
   let connection = resolveSessionConnection({ serverUrl: params.serverUrl, token: params.token })
+  try {
+    await request({
+      serverUrl: connection.serverUrl,
+      token: connection.token,
+      route: "/api/workspace/refresh",
+      body: {
+        workspaceId: params.workspaceId,
+        syncContext: true,
+      },
+    })
+  } catch {
+    // Session start should still work for read-only tokens; best-effort reconcile only.
+  }
   let pull = await syncPull({
     serverUrl: connection.serverUrl,
     token: connection.token,

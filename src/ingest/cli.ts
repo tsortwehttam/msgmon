@@ -2,8 +2,9 @@ import path from "node:path"
 import yargs from "yargs"
 import type { Argv } from "yargs"
 import { ingestOnce, watch, buildDefaultStatePath } from "./ingest"
-import { createNdjsonSink, createDirSink, createExecSink } from "./sinks"
+import { createNdjsonSink, createJsonFileSink, createExecSink } from "./sinks"
 import type { Sink } from "./sinks"
+import { DEFAULT_GMAIL_WORKSPACE_QUERY } from "../defaults"
 import { gmailSource, markGmailRead, fetchGmailAttachment } from "../../platforms/gmail/MailSource"
 import { slackSource, markSlackRead } from "../../platforms/slack/SlackSource"
 import type { MessageSource } from "./ingest"
@@ -32,7 +33,7 @@ let buildSink = (argv: {
     // For attachment fetching, we need account context.
     // Use the first account as default — the dir sink writes once per message.
     let defaultAccount = argv.account[0] ?? "default"
-    return createDirSink({
+    return createJsonFileSink({
       outDir,
       saveAttachments: argv.saveAttachments,
       fetchAttachment: argv.saveAttachments
@@ -85,7 +86,7 @@ let sharedOptions = (y: Argv) =>
     })
     .option("query", {
       type: "string",
-      default: "is:unread",
+      default: DEFAULT_GMAIL_WORKSPACE_QUERY,
       describe: "Search query (platform-native syntax, e.g. Gmail query)",
     })
     .option("max-results", {
@@ -195,13 +196,13 @@ export let configureIngestCli = (cli: Argv) =>
     .example("$0 --account=work --account=personal", "Ingest from multiple accounts, emit NDJSON to stdout")
     .example("$0 --sink=dir --out-dir=./inbox --save-attachments", "Save messages + attachments to scannable directories")
     .example("$0 --sink=exec --exec-cmd='./handle.sh'", "Run a command for each new message")
-    .example("$0 --query='is:unread' --mark-read", "Ingest unread messages and mark them read")
+    .example(`$0 --query='${DEFAULT_GMAIL_WORKSPACE_QUERY}' --mark-read`, "Ingest unread primary-inbox messages and mark them read")
     .example("$0 --seed --query='newer_than:30d' --max-results=500", "Seed state with recent history without emitting")
     .epilog(
       [
         "Output contract:",
         "- --sink=ndjson: one UnifiedMessage JSON per line to stdout. Summary to stderr.",
-        "- --sink=dir: one directory per message under --out-dir with unified.json, body.txt, body.html, attachments/.",
+        "- --sink=dir: one JSON file per message under --out-dir.",
         "- --sink=exec: runs --exec-cmd per message with MSGMON_* env vars and MSGMON_JSON containing the full UnifiedMessage.",
         "",
         "State:",

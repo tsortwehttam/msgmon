@@ -12,7 +12,7 @@ import {
 } from "../CliConfig"
 import { inferWorkspaceAccounts } from "../workspace/accounts"
 import { initWorkspace, loadWorkspaceConfig, listWorkspaceIds } from "../workspace/store"
-import { refreshWorkspace } from "../workspace/runtime"
+import { refreshWorkspace, syncWorkspaceContext } from "../workspace/runtime"
 
 // ---------------------------------------------------------------------------
 // Interactive helpers
@@ -129,7 +129,7 @@ let authorizeOneGmailAccount = async (): Promise<boolean> => {
     // Use the email address as the account name
     let accountName: string
     try {
-      let gmail = google.gmail({ version: "v1", auth })
+      let gmail = google.gmail({ version: "v1", auth: auth as never })
       let profile = await gmail.users.getProfile({ userId: "me" })
       accountName = profile.data.emailAddress ?? "default"
     } catch {
@@ -297,23 +297,27 @@ let pickSlackChannels = async (): Promise<string[]> => {
 
   let accountName = slackAccounts[0]
   try {
-    let { slackClients } = await import("../../platforms/slack/slackClient")
+    let { slackClients, slackReadClient } = await import("../../platforms/slack/slackClient")
     let clients = slackClients(accountName)
-    let bot = clients.bot
+    let reader = slackReadClient(clients)
 
-    // Fetch all public channels in the workspace
+    // Only offer channels the bot can actually read.
     let channels: Array<{ id: string; name: string }> = []
+    let skippedUnreadable = 0
     let cursor: string | undefined
     while (true) {
-      let res = await bot.conversations.list({
+      let res = await reader.conversations.list({
         types: "public_channel,private_channel",
         limit: 1000,
         exclude_archived: true,
         cursor,
       })
       for (let ch of res.channels ?? []) {
-        if (ch.id && ch.name) {
+        if (!ch.id || !ch.name) continue
+        if (clients.user || ch.is_member) {
           channels.push({ id: ch.id, name: ch.name })
+        } else {
+          skippedUnreadable += 1
         }
       }
       cursor = res.response_metadata?.next_cursor || undefined
@@ -321,12 +325,20 @@ let pickSlackChannels = async (): Promise<string[]> => {
     }
 
     if (channels.length === 0) {
-      fail("No Slack channels found in this workspace.")
+      fail(clients.user
+        ? "No Slack channels found for this user token."
+        : "No Slack channels found that this bot is a member of.")
+      if (skippedUnreadable > 0) {
+        console.log("Invite the bot to the channels you want monitored, then run setup again.")
+      }
       return []
     }
 
     let names = channels.map(c => `#${c.name}`)
     console.log(`Found ${channels.length} channels: ${names.join(", ")}`)
+    if (skippedUnreadable > 0) {
+      info(`Skipped ${skippedUnreadable} channel(s) the bot is not a member of.`)
+    }
 
     if (await confirm("Monitor all of these channels?", true)) {
       return names
@@ -340,6 +352,15 @@ let pickSlackChannels = async (): Promise<string[]> => {
     return pickSlackChannels()
   } catch (err) {
     let msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes("missing_scope")) {
+      let { BOT_SCOPE_LIST, USER_SCOPE_LIST } = await import("../../platforms/slack/auth")
+      fail("Could not list Slack channels: your Slack token is missing required scopes.")
+      console.log(`Bot scopes needed: ${BOT_SCOPE_LIST.join(", ")}`)
+      console.log(`User scopes needed: ${USER_SCOPE_LIST.join(", ")}`)
+      console.log("Re-run Slack OAuth auth for this account to refresh the saved token scopes:")
+      console.log(`  msgmon slack auth --mode=oauth --account=${JSON.stringify(accountName)}`)
+      return []
+    }
     fail(`Could not list Slack channels: ${msg}`)
     return []
   }
@@ -423,6 +444,23 @@ let seedWorkspace = async (workspaceId: string): Promise<boolean> => {
   return result.errors.length === 0
 }
 
+let syncWorkspaceContextHistory = async (workspaceId: string): Promise<boolean> => {
+  info("Syncing recent context into workspace/context for the agent...")
+  let result = await syncWorkspaceContext({
+    workspaceId,
+    maxResults: 200,
+    saveAttachments: false,
+    verbose: false,
+  })
+
+  if (result.scanned > 0 || result.ingested > 0) {
+    ok(`${result.scanned} context message(s) scanned, ${result.ingested} written.`)
+  }
+
+  for (let err of result.errors) fail(err)
+  return result.errors.length === 0
+}
+
 // ---------------------------------------------------------------------------
 // Main setup flow
 // ---------------------------------------------------------------------------
@@ -498,6 +536,17 @@ export let runSetup = async (options: { workspace?: string }) => {
     step(6, "Seed Workspace")
     let seeded = await seedWorkspace(workspaceId)
     if (!seeded) {
+      let cont = await confirm("Continue anyway?", true)
+      if (!cont) {
+        console.log("Setup paused. Fix the issue and re-run `msgmon setup`.")
+        return
+      }
+    }
+
+    // Step 7: Context
+    step(7, "Sync Context")
+    let syncedContext = await syncWorkspaceContextHistory(workspaceId)
+    if (!syncedContext) {
       let cont = await confirm("Continue anyway?", true)
       if (!cont) {
         console.log("Setup paused. Fix the issue and re-run `msgmon setup`.")

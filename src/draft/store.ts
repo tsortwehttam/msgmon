@@ -12,14 +12,25 @@ let draftsDir = (workspaceId: string) => {
 
 export let generateDraftId = () => crypto.randomUUID()
 
+export let draftFileName = (draft: Pick<Draft, "id" | "createdAt">) => {
+  let stamp = draft.createdAt.replace(/[:.]/g, "-")
+  return `${stamp}_${draft.id}.json`
+}
+
 export let saveDraft = (workspaceId: string, draft: Draft) => {
-  let filePath = path.resolve(draftsDir(workspaceId), `${draft.id}.json`)
+  let dir = draftsDir(workspaceId)
+  for (let file of fs.readdirSync(dir)) {
+    if (file.endsWith(`_${draft.id}.json`)) fs.unlinkSync(path.resolve(dir, file))
+  }
+  let filePath = path.resolve(dir, draftFileName(draft))
   fs.writeFileSync(filePath, JSON.stringify(draft, null, 2) + "\n")
   return filePath
 }
 
 export let loadDraft = (workspaceId: string, id: string): Draft => {
-  let filePath = path.resolve(draftsDir(workspaceId), `${id}.json`)
+  let dir = draftsDir(workspaceId)
+  let fileName = fs.readdirSync(dir).find(file => file.endsWith(`_${id}.json`))
+  let filePath = fileName ? path.resolve(dir, fileName) : path.resolve(dir, `${id}.json`)
   if (!fs.existsSync(filePath)) throw new Error(`Draft "${id}" not found in workspace "${workspaceId}"`)
   let raw = JSON.parse(fs.readFileSync(filePath, "utf8"))
   return Draft.parse(raw)
@@ -44,7 +55,9 @@ export let listDrafts = (workspaceId: string, platform?: string): Draft[] => {
 }
 
 export let deleteDraft = (workspaceId: string, id: string) => {
-  let filePath = path.resolve(draftsDir(workspaceId), `${id}.json`)
+  let dir = draftsDir(workspaceId)
+  let fileName = fs.readdirSync(dir).find(file => file.endsWith(`_${id}.json`))
+  let filePath = fileName ? path.resolve(dir, fileName) : path.resolve(dir, `${id}.json`)
   if (!fs.existsSync(filePath)) throw new Error(`Draft "${id}" not found in workspace "${workspaceId}"`)
   fs.unlinkSync(filePath)
 }

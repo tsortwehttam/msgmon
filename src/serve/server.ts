@@ -253,9 +253,10 @@ let handleSlackSearch = async (body: unknown) => {
   let v = validate(SlackSearchRequest, body)
   if (!v.success) return { status: 400, error: v.error }
   let p = v.data
-  let { slackClients } = await import("../../platforms/slack/slackClient")
+  let { slackClients, slackReadClient } = await import("../../platforms/slack/slackClient")
 
   let clients = slackClients(p.account)
+  let reader = slackReadClient(clients)
   if (!clients.user) {
     return { status: 400, error: "search requires a user token (xoxp-). Run: msgmon slack auth --mode=oauth" }
   }
@@ -273,28 +274,29 @@ let handleSlackRead = async (body: unknown) => {
   let v = validate(SlackReadRequest, body)
   if (!v.success) return { status: 400, error: v.error }
   let p = v.data
-  let [{ slackClients }, { toUnifiedMessage: slackToUnifiedMessage }] = await Promise.all([
+  let [{ slackClients, slackReadClient }, { toUnifiedMessage: slackToUnifiedMessage }] = await Promise.all([
     import("../../platforms/slack/slackClient"),
     import("../../platforms/slack/toUnifiedMessage"),
   ])
 
   let clients = slackClients(p.account)
+  let reader = slackReadClient(clients)
 
   // Resolve channel name to ID
   let channelId = p.channel
   let channelName = p.channel
   if (channelId.startsWith("#")) {
-    let r = await clients.bot.conversations.list({
+    let r = await reader.conversations.list({
       types: "public_channel,private_channel",
       limit: 1000,
     })
-    let match = (r.channels ?? []).find(c => c.name === channelId.replace(/^#/, ""))
+    let match = (r.channels ?? []).find((c: { name?: string }) => c.name === channelId.replace(/^#/, ""))
     if (!match?.id) return { status: 404, error: `Channel "${channelId}" not found` }
     channelName = match.name ?? channelId
     channelId = match.id
   }
 
-  let r = await clients.bot.conversations.history({
+  let r = await reader.conversations.history({
     channel: channelId,
     latest: p.ts,
     inclusive: true,
@@ -306,7 +308,7 @@ let handleSlackRead = async (body: unknown) => {
   let userCache = new Map<string, string>()
   if (msg.user) {
     try {
-      let u = await clients.bot.users.info({ user: msg.user })
+      let u = await reader.users.info({ user: msg.user })
       let name = u.user?.profile?.display_name || u.user?.profile?.real_name || u.user?.name
       if (name) userCache.set(msg.user, name)
     } catch { /* proceed without name */ }
@@ -591,7 +593,7 @@ let buildLlmsText = (opts: ServeOptions) => [
   "1. Read this file.",
   "2. Call GET /api/agent/manifest with X-Auth-Token.",
   "3. Call POST /api/workspace/export to materialize a local workspace mirror.",
-  "4. Edit only writable files such as status.md, drafts/, and corpus/.",
+  "4. Edit only writable files such as status.md and drafts/.",
   "5. Send local changes back with POST /api/workspace/push.",
   "6. Request privileged actions through POST /api/workspace/actions or the send endpoints.",
   "",
@@ -607,7 +609,7 @@ let buildLlmsText = (opts: ServeOptions) => [
   "",
   "Recommended agent behavior:",
   "- Never send without explicit user approval.",
-  "- Treat workspace.json and inbox/ as read-only.",
+  "- Treat workspace.json, inbox/, and context/ as read-only.",
   "- Use polling rather than assuming push transport.",
 ].join("\n")
 
@@ -627,13 +629,13 @@ let buildAgentManifest = (tokenSpec: TokenSpec) => ({
     bootstrapRoute: "/api/workspace/bootstrap",
     importRoute: "/api/workspace/import",
     refreshRoute: "/api/workspace/refresh",
-    writablePaths: ["status.md", "instructions.md", "user-profile.md", "drafts/**", "corpus/**"],
-    readOnlyPaths: ["workspace.json", "inbox/**"],
+    writablePaths: ["status.md", "instructions.md", "user-profile.md", "drafts/**"],
+    readOnlyPaths: ["workspace.json", "inbox/**", "context/**"],
   },
   workflows: [
     "Pull a workspace snapshot into an isolated local directory.",
     "Read inbox items and update status.md.",
-    "Create or revise drafts under drafts/.",
+    "Create or revise drafts under drafts/ as flat json files.",
     "Push bounded local changes back to the server.",
     "Ask for user approval before any send/archive/mark-read action.",
   ],
@@ -707,14 +709,15 @@ let buildRoutes = (opts: ServeOptions): Record<string, RouteDef> => {
     if (!isSlackChannelAllowed(p.channel, opts.slackAllowChannels)) {
       return { status: 400, error: `Channel "${p.channel}" is not in --slack-allow-channels.` }
     }
-    let { slackClients, uploadFilesToChannel } = await import("../../platforms/slack/slackClient")
+    let { slackClients, slackReadClient, uploadFilesToChannel, postMessageWithJoinFallback } = await import("../../platforms/slack/slackClient")
 
     let clients = slackClients(p.account)
+    let reader = slackReadClient(clients)
     let sendClient = p.asUser && clients.user ? clients.user : clients.bot
 
     let channelId = p.channel
     if (channelId.startsWith("#")) {
-      let r = await clients.bot.conversations.list({
+      let r = await reader.conversations.list({
         types: "public_channel,private_channel",
         limit: 1000,
       })
@@ -726,10 +729,12 @@ let buildRoutes = (opts: ServeOptions): Record<string, RouteDef> => {
     // Send text message if present
     let messageResult: { ok?: boolean; ts?: string; channel?: string } | null = null
     if (p.text) {
-      let r = await sendClient.chat.postMessage({
-        channel: channelId,
+      let r = await postMessageWithJoinFallback({
+        clients,
+        sendClient,
+        channelId,
         text: p.text,
-        thread_ts: p.threadTs,
+        threadTs: p.threadTs,
       })
       messageResult = { ok: r.ok, ts: r.ts, channel: r.channel }
     }

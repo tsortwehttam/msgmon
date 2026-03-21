@@ -45,6 +45,8 @@ export type MessageSource = {
     account: string
     query: string
     maxResults: number
+    oldest?: string
+    latest?: string
     verbose: boolean
   }): AsyncGenerator<UnifiedMessage>
 }
@@ -54,7 +56,7 @@ export type MessageSource = {
 // ---------------------------------------------------------------------------
 
 export type IngestParams = {
-  sources: Array<{ source: MessageSource; accounts: string[]; query?: string }>
+  sources: Array<{ source: MessageSource; accounts: string[]; query?: string; oldest?: string; latest?: string }>
   query: string
   maxResults: number
   sink: Sink
@@ -75,15 +77,17 @@ export let ingestOnce = async (params: IngestParams): Promise<{ ingested: number
   let scanned = 0
   let errors: string[] = []
 
-  for (let { source, accounts, query } of params.sources) {
+  for (let { source, accounts, query, oldest, latest } of params.sources) {
     for (let account of accounts) {
       let effectiveQuery = query ?? params.query
-      verboseLog(params.verbose, "ingest scanning", { account, query: effectiveQuery })
+      verboseLog(params.verbose, "ingest scanning", { account, query: effectiveQuery, oldest, latest })
       try {
         for await (let msg of source.listMessages({
           account,
           query: effectiveQuery,
           maxResults: params.maxResults,
+          oldest,
+          latest,
           verbose: params.verbose,
         })) {
           scanned += 1

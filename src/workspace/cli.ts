@@ -2,8 +2,9 @@ import yargs from "yargs"
 import type { Argv } from "yargs"
 import { initWorkspace, loadWorkspaceConfig, listWorkspaceIds } from "./store"
 import { inferWorkspaceAccounts } from "./accounts"
-import { refreshWorkspace } from "./runtime"
+import { refreshWorkspace, syncWorkspaceContext } from "./runtime"
 import { verboseLog } from "../Verbose"
+import { DEFAULT_GMAIL_WORKSPACE_QUERY } from "../defaults"
 
 let normalizeMultiValue = (value: unknown) => {
   if (value == null) return []
@@ -39,8 +40,22 @@ export let configureWorkspaceCli = (cli: Argv) =>
           })
           .option("query", {
             type: "string",
-            default: "is:unread",
+            default: DEFAULT_GMAIL_WORKSPACE_QUERY,
             describe: "Default ingest query",
+          })
+          .option("context-window-days", {
+            type: "number",
+            default: 14,
+            describe: "Default historical context window in days for workspace/context",
+          })
+          .option("context-max-results", {
+            type: "number",
+            default: 200,
+            describe: "Maximum historical context messages to sync per account",
+          })
+          .option("context-query", {
+            type: "string",
+            describe: "Optional Gmail-only base query for historical context sync",
           }),
       async argv => {
         let inferredAccounts = !argv.account || argv.account.length === 0
@@ -53,6 +68,9 @@ export let configureWorkspaceCli = (cli: Argv) =>
           name: argv.name,
           accounts,
           query: argv.query,
+          contextWindowDays: argv.contextWindowDays,
+          contextMaxResults: argv.contextMaxResults,
+          contextQuery: argv.contextQuery,
         })
 
         console.log(JSON.stringify({
@@ -94,6 +112,24 @@ export let configureWorkspaceCli = (cli: Argv) =>
             default: false,
             describe: "Record IDs in state without writing inbox files",
           })
+          .option("sync-context", {
+            type: "boolean",
+            default: false,
+            describe: "Also sync historical context into workspace/context",
+          })
+          .option("context-max-results", {
+            type: "number",
+            describe: "Override workspace context max-results for this run",
+          })
+          .option("context-since", {
+            type: "string",
+            describe: "Backfill Gmail context since YYYY-MM-DD",
+          })
+          .option("clear-context", {
+            type: "boolean",
+            default: false,
+            describe: "Clear workspace/context and reset its state before syncing",
+          })
           .option("verbose", {
             alias: "v",
             type: "boolean",
@@ -115,7 +151,62 @@ export let configureWorkspaceCli = (cli: Argv) =>
           markRead: argv.markRead,
           saveAttachments: argv.saveAttachments,
           seed: argv.seed,
+          syncContext: argv.syncContext,
+          contextMaxResults: argv.contextMaxResults,
+          contextSince: argv.contextSince,
+          clearContext: argv.clearContext,
           verbose: argv.verbose,
+        })
+
+        console.log(JSON.stringify({
+          workspaceId: argv.id,
+          ...result,
+        }, null, 2))
+      },
+    )
+    .command(
+      "context-sync <id>",
+      "Sync historical context into the server-owned workspace context directory",
+      y =>
+        y
+          .positional("id", {
+            type: "string",
+            demandOption: true,
+            describe: "Workspace identifier",
+          })
+          .option("max-results", {
+            type: "number",
+            default: 200,
+            describe: "Maximum context messages per account per sync",
+          })
+          .option("since", {
+            type: "string",
+            describe: "Backfill Gmail context since YYYY-MM-DD",
+          })
+          .option("clear", {
+            type: "boolean",
+            default: false,
+            describe: "Clear workspace/context and reset its state before syncing",
+          })
+          .option("save-attachments", {
+            type: "boolean",
+            default: false,
+            describe: "Download and save attachments into context message directories",
+          })
+          .option("verbose", {
+            alias: "v",
+            type: "boolean",
+            default: false,
+            describe: "Print diagnostic details to stderr",
+          }),
+      async argv => {
+        let result = await syncWorkspaceContext({
+          workspaceId: argv.id!,
+          maxResults: argv.maxResults,
+          saveAttachments: argv.saveAttachments,
+          verbose: argv.verbose,
+          since: argv.since,
+          clear: argv.clear,
         })
 
         console.log(JSON.stringify({
@@ -146,7 +237,7 @@ export let configureWorkspaceCli = (cli: Argv) =>
         console.log(JSON.stringify({ workspaces: listWorkspaceIds() }, null, 2))
       },
     )
-    .demandCommand(1, "Choose a command: init, refresh, show, or list.")
+    .demandCommand(1, "Choose a command: init, refresh, context-sync, show, or list.")
     .strict()
     .help()
 

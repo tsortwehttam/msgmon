@@ -23,7 +23,7 @@ The recommended way to run an agent is with three processes across two directori
 ```bash
 # 1. Install and run interactive setup (project directory)
 npm install && npm link
-msgmon setup                       # walks through Gmail/Slack auth, workspace creation, and seeding
+msgmon setup                       # walks through Gmail/Slack auth, workspace creation, action seeding, and context sync
 
 # 2. Start the server (project directory — keeps running)
 msgmon serve
@@ -37,7 +37,7 @@ msgmon session start \
   --agent-command='codex .'
 ```
 
-The `--dir` flag places the agent's working copy outside the project tree. The agent sees only the workspace snapshot files (`inbox/`, `workspace.json`, `instructions.md`, `drafts/`, etc.) and a `.msgmon-session/` folder with sync metadata. It never sees OAuth tokens, `credentials.json`, or `serve.json`.
+The `--dir` flag places the agent's working copy outside the project tree. The agent sees only the workspace snapshot files (`inbox/`, `context/`, `workspace.json`, `instructions.md`, `drafts/`, etc.) and a `.msgmon-session/` folder with sync metadata. It never sees OAuth tokens, `credentials.json`, or `serve.json`.
 
 New messages reach the agent through periodic refresh. Either:
 
@@ -125,7 +125,7 @@ msgmon watch --sink=exec --exec-cmd='./agent.sh' --mark-read
 
 ### `msgmon draft`
 
-Workspace-owned draft management. Compose messages targeting any platform, review them, and send when ready. Drafts now live under `.msgmon/workspaces/<workspaceId>/drafts/` and every draft command requires `--workspace`.
+Workspace-owned draft management. Compose messages targeting any platform, review them, and send when ready. Drafts live as flat JSON files under `.msgmon/workspaces/<workspaceId>/drafts/` and every draft command requires `--workspace`.
 
 ```bash
 # Compose a gmail draft (reply to a thread)
@@ -161,8 +161,9 @@ Outputs `messages.jsonl`, `chunks.jsonl`, `threads.jsonl`, and `summary.json`.
 Server-managed workspace lifecycle. Workspaces live under `.msgmon/workspaces/<id>` and are intended to be exported into isolated agent runtimes as plain files, without exposing local OAuth tokens or unrestricted send capability.
 
 ```bash
-msgmon workspace init inbox-agent --account=default --query='is:unread'
+msgmon workspace init inbox-agent --account=default --query='in:inbox category:primary is:unread'
 msgmon workspace refresh inbox-agent --max-results=100
+msgmon workspace context-sync inbox-agent --since=2026-03-01
 msgmon workspace show inbox-agent
 msgmon workspace list
 ```
@@ -173,9 +174,9 @@ Each workspace contains:
 - `instructions.md` — agent operating instructions
 - `user-profile.md` — user context and preferences
 - `status.md` — agent-maintained working summary
-- `inbox/` — ingested message directories
+- `inbox/` — newly ingested actionable message JSON files
+- `context/` — system-managed historical reference message JSON files
 - `drafts/` — draft JSON files that can later be sent through `serve`
-- `corpus/` — optional retrieval artifacts
 
 ### `msgmon serve`
 
@@ -230,7 +231,7 @@ Every request must include the header `X-Auth-Token: <token>`. All endpoints acc
 | `POST /api/workspace/export` | Export agent-safe workspace snapshot or bundle (`{ workspaceId, format? }`) |
 | `POST /api/workspace/bootstrap` | Create a workspace (`{ workspaceId, name?, accounts?, query?, overwrite? }`) |
 | `POST /api/workspace/import` | Import a bundled workspace (`{ workspaceId?, bundleBase64, overwrite? }`) |
-| `POST /api/workspace/refresh` | Ingest new messages into workspace inbox (`{ workspaceId, maxResults?, markRead?, saveAttachments?, seed? }`) |
+| `POST /api/workspace/refresh` | Ingest new inbox messages and optionally sync historical context (`{ workspaceId, maxResults?, markRead?, saveAttachments?, seed?, syncContext?, contextMaxResults?, contextSince?, clearContext? }`) |
 | `POST /api/workspace/push` | Push bounded file edits (`{ workspaceId, baseRevision, files[] }`) |
 | `POST /api/workspace/actions` | Apply privileged workspace actions (`{ workspaceId, actions[] }`) |
 | `GET /.well-known/llms.txt` | Human-readable bootstrap instructions for coding agents |
@@ -243,7 +244,7 @@ Every request must include the header `X-Auth-Token: <token>`. All endpoints acc
 - `/api/workspace/export` returns either a JSON snapshot or a gzip-compressed bundle export.
 - `/api/workspace/bootstrap` creates a new server-owned workspace.
 - `/api/workspace/import` imports a previously exported bundle into a new or existing workspace.
-- `/api/workspace/push` accepts bounded changes back for writable files such as `status.md`, `drafts/*.json`, and `corpus/**`.
+- `/api/workspace/push` accepts bounded changes back for writable files such as `status.md` and `drafts/*.json`.
 - `/api/workspace/actions` is the policy gate for privileged operations such as sending drafts, marking messages read, and archiving Gmail.
 - Hidden server files such as state and workspace-local credentials are not included in exports.
 
@@ -257,7 +258,7 @@ msgmon sync push --workspace=inbox-agent
 msgmon sync watch --server=http://127.0.0.1:3271 --token=reader --workspace=inbox-agent
 ```
 
-By default the local mirror lives at `./.msgmon/agent/<workspace>/`. `pull` refuses to overwrite locally modified writable files unless `--force` is passed. `push` sends only bounded writable paths back to the server: `status.md`, `instructions.md`, `user-profile.md`, `drafts/**`, and `corpus/**`.
+By default the local mirror lives at `./.msgmon/agent/<workspace>/`. `pull` refuses to overwrite locally modified writable files unless `--force` is passed. `push` sends only bounded writable paths back to the server: `status.md`, `instructions.md`, `user-profile.md`, and `drafts/**`.
 `watch` automatically pushes bounded local file changes before each pull cycle unless you pass `--no-auto-push`.
 
 ### `msgmon session`
@@ -284,7 +285,7 @@ Both `ingest` and `watch` support three output sinks:
 | Sink | Flag | Description |
 |------|------|-------------|
 | **ndjson** | `--sink=ndjson` (default) | One `UnifiedMessage` JSON per line to stdout. Pipe-friendly. |
-| **dir** | `--sink=dir --out-dir=PATH` | One directory per message: `unified.json`, `body.txt`, `body.html`, `headers.json`, `attachments/`. |
+| **dir** | `--sink=dir --out-dir=PATH` | One JSON file per message: `<timestamp>_<id>.json`. |
 | **exec** | `--sink=exec --exec-cmd=CMD` | Run a shell command per message with `MSGMON_*` env vars and `MSGMON_JSON`. |
 
 ### Shared ingest/watch flags
@@ -292,7 +293,7 @@ Both `ingest` and `watch` support three output sinks:
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--account` | `default` | Account name(s), repeatable/comma-separated |
-| `--query` | `is:unread` | Platform-native search query |
+| `--query` | `in:inbox category:primary is:unread` | Platform-native search query |
 | `--max-results` | `100` | Max messages per account per cycle |
 | `--mark-read` | `false` | Mark messages as read after ingestion |
 | `--seed` | `false` | Record IDs in state without emitting to sink (cold-start seeding) |
@@ -394,9 +395,9 @@ The secure operating model is:
 
 This keeps the agent file-native while keeping secrets and outbound policy on the server side.
 
-### Cold start: seeding history
+### Cold start: seed now, sync context separately
 
-On first run, `ingest` would emit every message matching the query as "new." For an agent, this is usually wrong — you want it to start processing from *now*, not re-process 30 days of history.
+On first run, `ingest` would emit every message matching the query as "new." For an agent, this is usually wrong. You want the action boundary to start from *now*, while still letting the agent read recent history for context.
 
 Use `--seed` to populate the state file without emitting anything:
 
@@ -404,11 +405,14 @@ Use `--seed` to populate the state file without emitting anything:
 # Seed: absorb recent history silently
 msgmon ingest --seed --query='newer_than:30d' --max-results=500
 
-# Now refresh a workspace normally — only genuinely new messages are written
+# Sync historical reference material into workspace/context
+msgmon workspace context-sync inbox-agent --since=2026-03-01
+
+# Now refresh the actionable inbox normally
 msgmon workspace refresh inbox-agent --mark-read
 ```
 
-The seed run records all matching message IDs in the state file. Subsequent refresh runs skip those IDs and only write messages that arrive after the seed.
+The seed run records the action boundary in the state file. Historical backfills go into `context/`, while subsequent refresh runs only write genuinely new actionable messages into `inbox/`.
 
 ### Accessing thread context
 
@@ -420,7 +424,7 @@ Run `msgmon serve` in the trusted environment where OAuth credentials live. The 
 
 ```bash
 # On the server (has credentials)
-msgmon workspace init inbox-agent --account=default --query='is:unread'
+msgmon workspace init inbox-agent --account=default --query='in:inbox category:primary is:unread'
 msgmon workspace refresh inbox-agent
 msgmon serve \
   --scoped-token=reader=read,workspace_read \

@@ -35,25 +35,18 @@ export let createNdjsonSink = (params: {
 }
 
 // ---------------------------------------------------------------------------
-// Dir sink — per-message scannable directory with unified.json + artifacts
+// Dir sink — one JSON file per message
 // ---------------------------------------------------------------------------
 
 let sanitizeFileName = (value: string) =>
   value.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^_+/, "").slice(0, 200) || "file"
 
-let uniquePath = (dir: string, baseName: string) => {
-  let ext = path.extname(baseName)
-  let name = path.basename(baseName, ext)
-  let candidate = path.resolve(dir, baseName)
-  let i = 1
-  while (fs.existsSync(candidate)) {
-    candidate = path.resolve(dir, `${name}_${i}${ext}`)
-    i += 1
-  }
-  return candidate
+let messageFileName = (msg: UnifiedMessage) => {
+  let stamp = msg.timestamp.replace(/[:.]/g, "-")
+  return `${stamp}_${sanitizeFileName(msg.id)}.json`
 }
 
-export let createDirSink = (params: {
+export let createJsonFileSink = (params: {
   outDir: string
   saveAttachments?: boolean
   /** Called when attachment data is needed — platform adapter provides this */
@@ -62,43 +55,8 @@ export let createDirSink = (params: {
   fs.mkdirSync(params.outDir, { recursive: true })
   return {
     async write(msg) {
-      let safeSubject = sanitizeFileName(msg.subject ?? "no_subject")
-      let stamp = msg.timestamp.replace(/[:.]/g, "-")
-      let dirName = `${stamp}_${msg.id}_${safeSubject}`
-      let msgDir = path.resolve(params.outDir, dirName)
-      fs.mkdirSync(msgDir, { recursive: true })
-
-      // unified.json — the canonical output
-      fs.writeFileSync(path.resolve(msgDir, "unified.json"), JSON.stringify(msg, null, 2) + "\n")
-
-      // body.txt
-      if (msg.bodyText) fs.writeFileSync(path.resolve(msgDir, "body.txt"), msg.bodyText)
-
-      // body.html
-      if (msg.bodyHtml) fs.writeFileSync(path.resolve(msgDir, "body.html"), msg.bodyHtml)
-
-      // headers.json (for mail, extract from platformMetadata)
-      if (msg.platformMetadata.platform === "gmail" && msg.platformMetadata.headers) {
-        fs.writeFileSync(
-          path.resolve(msgDir, "headers.json"),
-          JSON.stringify(msg.platformMetadata.headers, null, 2) + "\n",
-        )
-      }
-
-      // attachments
-      if (params.saveAttachments && msg.attachments && msg.attachments.length > 0) {
-        let attDir = path.resolve(msgDir, "attachments")
-        fs.mkdirSync(attDir, { recursive: true })
-        for (let att of msg.attachments) {
-          if (params.fetchAttachment) {
-            let data = await params.fetchAttachment(msg, att.filename)
-            if (data) {
-              let outPath = uniquePath(attDir, sanitizeFileName(att.filename))
-              fs.writeFileSync(outPath, data)
-            }
-          }
-        }
-      }
+      let filePath = path.resolve(params.outDir, messageFileName(msg))
+      fs.writeFileSync(filePath, JSON.stringify(msg, null, 2) + "\n")
     },
   }
 }
