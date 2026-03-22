@@ -136,7 +136,7 @@ Server workspaces contain:
 
 The pull decision is concrete:
 - filter set: the workspace query by default, or `--query` for a one-off Gmail override, plus configured Slack channels or `--slack-channels`
-- lower bound: `--since` if provided; otherwise the newest existing message timestamp in `messages.jsonl`; otherwise `pullWindowDays` from `workspace.json`
+- lower bound: `--since` if provided; otherwise the newest existing message timestamp in `messages.jsonl`
 - upper bound: `--until` if provided; otherwise the exact current timestamp
 
 Examples:

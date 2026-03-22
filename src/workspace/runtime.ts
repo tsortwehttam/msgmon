@@ -148,10 +148,8 @@ export let latestPulledMessageTimestamp = (workspaceId: string) => {
   })
 }
 
-let defaultPullSince = async (workspaceId: string, pullWindowDays: number) => {
-  let latest = await latestPulledMessageTimestamp(workspaceId)
-  if (latest) return latest
-  return new Date(Date.now() - pullWindowDays * 24 * 60 * 60 * 1000).toISOString()
+let defaultPullSince = async (workspaceId: string) => {
+  return latestPulledMessageTimestamp(workspaceId)
 }
 
 let defaultPullUntil = () => new Date().toISOString()
@@ -179,7 +177,7 @@ export let pullWorkspaceMessages = async (params: {
     fs.rmSync(messagesPath, { force: true })
   }
 
-  let effectiveSince = params.since ?? await defaultPullSince(config.id, config.pullWindowDays)
+  let effectiveSince = params.since ?? await defaultPullSince(config.id)
   let effectiveUntil = params.until ?? defaultPullUntil()
   let sinceMs = timestampMs(effectiveSince)
   let untilMs = timestampMs(effectiveUntil)

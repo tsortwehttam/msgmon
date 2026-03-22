@@ -55,11 +55,6 @@ export let configureServerCli = (cli: Argv) =>
             default: DEFAULT_GMAIL_WORKSPACE_QUERY,
             describe: "Default ingest query",
           })
-          .option("pull-window-days", {
-            type: "number",
-            default: 14,
-            describe: "Default lookback window in days when --since is omitted and no messages exist yet",
-          })
           .option("overwrite", {
             type: "boolean",
             default: false,
@@ -77,7 +72,6 @@ export let configureServerCli = (cli: Argv) =>
           name: argv.name ?? path.basename(dir),
           accounts,
           query: argv.query,
-          pullWindowDays: argv.pullWindowDays,
           overwrite: argv.overwrite,
         })
 
@@ -122,7 +116,7 @@ export let configureServerCli = (cli: Argv) =>
           })
           .option("since", {
             type: "string",
-            describe: "Lower time bound as ISO timestamp or YYYY-MM-DD. Defaults to the newest pulled message timestamp, or the configured pull window when empty.",
+            describe: "Lower time bound as ISO timestamp or YYYY-MM-DD. Defaults to the newest pulled message timestamp.",
           })
           .option("until", {
             type: "string",

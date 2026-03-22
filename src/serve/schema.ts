@@ -143,7 +143,6 @@ export let WorkspaceBootstrapRequest = WorkspaceIdParam.extend({
   name: z.string().optional(),
   accounts: z.array(z.string()).min(1).default(["default"]),
   query: z.string().default(DEFAULT_GMAIL_WORKSPACE_QUERY),
-  pullWindowDays: z.number().int().min(1).default(14),
   overwrite: z.boolean().default(false),
 })
 export type WorkspaceBootstrapRequest = z.infer<typeof WorkspaceBootstrapRequest>

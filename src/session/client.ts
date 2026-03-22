@@ -19,7 +19,6 @@ export type WorkspaceSnapshot = {
     name: string
     accounts: string[]
     query: string
-    pullWindowDays: number
     createdAt: string
     updatedAt: string
   }

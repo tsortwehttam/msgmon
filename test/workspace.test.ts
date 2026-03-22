@@ -62,7 +62,6 @@ describe("workspace store", () => {
     })
 
     assert.equal(result.config.id, "alpha")
-    assert.equal(result.config.pullWindowDays, 14)
     assert.equal(result.path, dir)
     assert.ok(fs.existsSync(path.join(result.path, "workspace.json")))
     assert.ok(fs.existsSync(path.join(result.path, "messages.jsonl")))

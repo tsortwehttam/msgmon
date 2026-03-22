@@ -125,7 +125,6 @@ export let createWorkspaceHandlers = (opts: WorkspaceApiOptions): Record<string,
         name: v.data.name,
         accounts: v.data.accounts,
         query: v.data.query,
-        pullWindowDays: v.data.pullWindowDays,
         overwrite: v.data.overwrite,
       })
       return { status: 200, data: { workspaceId: result.config.id, config: result.config, path: result.path } }
