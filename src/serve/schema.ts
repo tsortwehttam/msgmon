@@ -127,25 +127,24 @@ export let WorkspaceExportRequest = WorkspaceIdParam.extend({
 })
 export type WorkspaceExportRequest = z.infer<typeof WorkspaceExportRequest>
 
-export let WorkspaceRefreshRequest = WorkspaceIdParam.extend({
+export let WorkspacePullRequest = WorkspaceIdParam.extend({
   maxResults: z.number().int().min(1).default(100),
   markRead: z.boolean().default(false),
   saveAttachments: z.boolean().default(false),
   seed: z.boolean().default(false),
-  syncContext: z.boolean().default(false),
-  contextMaxResults: z.number().int().min(1).optional(),
-  contextSince: z.string().optional(),
-  clearContext: z.boolean().default(false),
+  query: z.string().optional(),
+  slackChannels: z.array(z.string()).optional(),
+  since: z.string().optional(),
+  until: z.string().optional(),
+  clear: z.boolean().default(false),
 })
-export type WorkspaceRefreshRequest = z.infer<typeof WorkspaceRefreshRequest>
+export type WorkspacePullRequest = z.infer<typeof WorkspacePullRequest>
 
 export let WorkspaceBootstrapRequest = WorkspaceIdParam.extend({
   name: z.string().optional(),
   accounts: z.array(z.string()).min(1).default(["default"]),
   query: z.string().default(DEFAULT_GMAIL_WORKSPACE_QUERY),
-  contextWindowDays: z.number().int().min(1).default(14),
-  contextMaxResults: z.number().int().min(1).default(200),
-  contextQuery: z.string().optional(),
+  pullWindowDays: z.number().int().min(1).default(14),
   overwrite: z.boolean().default(false),
 })
 export type WorkspaceBootstrapRequest = z.infer<typeof WorkspaceBootstrapRequest>

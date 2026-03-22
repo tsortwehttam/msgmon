@@ -53,7 +53,7 @@ describe("workspace store", () => {
     return dir
   }
 
-  it("creates a server-managed workspace and exports only agent-safe files", () => {
+  it("creates a server workspace and exports only agent-safe files", () => {
     let dir = useDir("alpha")
     let result = workspaceStore.initWorkspace("alpha", {
       name: "Alpha Workspace",
@@ -62,22 +62,20 @@ describe("workspace store", () => {
     })
 
     assert.equal(result.config.id, "alpha")
-    assert.equal(result.config.contextWindowDays, 14)
-    assert.equal(result.config.contextMaxResults, 200)
+    assert.equal(result.config.pullWindowDays, 14)
     assert.equal(result.path, dir)
     assert.ok(fs.existsSync(path.join(result.path, "workspace.json")))
-    assert.ok(fs.existsSync(path.join(result.path, "inbox")))
-    assert.ok(fs.existsSync(path.join(result.path, "context")))
+    assert.ok(fs.existsSync(path.join(result.path, "messages")))
     assert.ok(fs.existsSync(path.join(result.path, ".msgmon", "state")))
 
     fs.writeFileSync(path.join(result.path, ".msgmon", "secret.txt"), "do not export")
-    fs.writeFileSync(path.join(result.path, "context", "note.txt"), "history")
+    fs.writeFileSync(path.join(result.path, "messages", "note.txt"), "history")
 
     let snapshot = workspaceStore.exportWorkspaceSnapshot("alpha")
     let paths = snapshot.files.map(file => file.path)
     assert.ok(paths.includes("workspace.json"))
     assert.ok(paths.includes("status.md"))
-    assert.ok(paths.includes("context/note.txt"))
+    assert.ok(paths.includes("messages/note.txt"))
     assert.ok(!paths.some(file => file.startsWith(".msgmon/")))
   })
 
@@ -97,7 +95,7 @@ describe("workspace store", () => {
     assert.match(fs.readFileSync(path.join(dir, "AGENTS.md"), "utf8"), /# Existing/)
     assert.ok(fs.existsSync(path.join(dir, "workspace.json")))
     assert.ok(fs.existsSync(path.join(dir, "status.md")))
-    assert.ok(fs.existsSync(path.join(dir, "inbox")))
+    assert.ok(fs.existsSync(path.join(dir, "messages")))
     assert.ok(fs.existsSync(path.join(dir, ".msgmon", "state")))
   })
 
@@ -162,39 +160,38 @@ describe("workspace store", () => {
     assert.match(status, /Bundled/)
   })
 
-  it("can seed the inbox boundary from bootstrapped context ids", () => {
-    useDir("seed-from-context")
+  it("tracks a pull state path and can infer the latest pulled message timestamp", () => {
+    let dir = useDir("pull-state")
     let result = workspaceStore.initWorkspace("default", {
       accounts: ["default"],
       query: "in:inbox category:primary is:unread",
     })
 
-    let inboxStatePath = workspaceRuntime.buildWorkspaceStatePath(
+    let pullStatePath = workspaceRuntime.buildWorkspacePullStatePath(
       result.config.id,
       result.config.accounts,
       result.config.query,
     )
+    assert.match(pullStatePath, /pull-[a-f0-9]{16}\.json$/)
 
-    let seeded = workspaceRuntime.seedInboxStateFromContextState({
-      workspaceId: "default",
-      ids: ["msg-1", "msg-2"],
-      timestamps: {
-        "msg-1": "2026-03-22T00:00:00.000Z",
-        "msg-2": "2026-03-22T00:01:00.000Z",
-      },
-    })
-    assert.equal(seeded.seeded, 2)
+    fs.mkdirSync(path.join(dir, "messages"), { recursive: true })
+    fs.writeFileSync(path.join(dir, "messages", "2026-03-22T00-00-00-000Z_gmail_a.json"), JSON.stringify({
+      id: "a",
+      platform: "gmail",
+      timestamp: "2026-03-22T00:00:00.000Z",
+      platformMetadata: { platform: "gmail", messageId: "a" },
+    }) + "\n")
+    fs.writeFileSync(path.join(dir, "messages", "2026-03-22T00-05-00-000Z_gmail_b.json"), JSON.stringify({
+      id: "b",
+      platform: "gmail",
+      timestamp: "2026-03-22T00:05:00.000Z",
+      platformMetadata: { platform: "gmail", messageId: "b" },
+    }) + "\n")
 
-    let state = JSON.parse(fs.readFileSync(inboxStatePath, "utf8")) as { ingested: Record<string, string> }
-    assert.equal(state.ingested["msg-1"], "2026-03-22T00:00:00.000Z")
-    assert.equal(state.ingested["msg-2"], "2026-03-22T00:01:00.000Z")
-
-    let seededAgain = workspaceRuntime.seedInboxStateFromContextState({
-      workspaceId: "default",
-      ids: ["msg-2"],
-      timestamps: { "msg-2": "2026-03-22T00:02:00.000Z" },
-    })
-    assert.equal(seededAgain.seeded, 0)
+    assert.equal(
+      workspaceRuntime.latestPulledMessageTimestamp("default"),
+      "2026-03-22T00:05:00.000Z",
+    )
   })
 })
 

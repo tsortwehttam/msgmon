@@ -14,7 +14,7 @@ import {
 } from "../CliConfig"
 import { inferWorkspaceAccounts } from "../workspace/accounts"
 import { initWorkspace, loadWorkspaceConfig, listWorkspaceIds } from "../workspace/store"
-import { bootstrapWorkspaceHistory } from "../workspace/runtime"
+import { pullWorkspaceMessages } from "../workspace/runtime"
 
 // ---------------------------------------------------------------------------
 // Interactive helpers
@@ -432,20 +432,22 @@ let setupWorkspace = async (workspaceId: string, slackChannels?: string[]): Prom
 }
 
 // ---------------------------------------------------------------------------
-// Bootstrap server workspace history
+// Initial server pull
 // ---------------------------------------------------------------------------
 
-let bootstrapWorkspaceHistoryForSetup = async (workspaceId: string): Promise<boolean> => {
-  info("Bootstrapping server workspace history...")
-  let result = await bootstrapWorkspaceHistory({
+let pullMessagesForSetup = async (workspaceId: string): Promise<boolean> => {
+  info("Pulling initial messages...")
+  let result = await pullWorkspaceMessages({
     workspaceId,
     maxResults: 200,
+    markRead: false,
     saveAttachments: false,
+    seed: false,
     verbose: false,
   })
 
-  if (result.scanned > 0 || result.ingested > 0 || result.inboxSeeded > 0) {
-    ok(`${result.scanned} message(s) scanned, ${result.ingested} written to context, ${result.inboxSeeded} seeded into the inbox boundary.`)
+  if (result.scanned > 0 || result.ingested > 0) {
+    ok(`${result.scanned} message(s) scanned, ${result.ingested} written to messages/ for ${result.since} to ${result.until}.`)
   }
 
   for (let err of result.errors) {
@@ -454,7 +456,7 @@ let bootstrapWorkspaceHistoryForSetup = async (workspaceId: string): Promise<boo
       console.log("Your token may have expired or been revoked.")
       if (await confirm("Re-authorize Gmail now?", true)) {
         let success = await authorizeOneGmailAccount()
-        if (success) return bootstrapWorkspaceHistoryForSetup(workspaceId)
+        if (success) return pullMessagesForSetup(workspaceId)
       }
     } else if (err.includes("Missing token")) {
       fail(`${err}`)
@@ -538,10 +540,10 @@ export let runSetup = async (options: { workspace?: string }) => {
       return
     }
 
-    // Step 6: Bootstrap
-    step(6, "Bootstrapping Server Workspace History")
-    let bootstrapped = await bootstrapWorkspaceHistoryForSetup(workspaceId)
-    if (!bootstrapped) {
+    // Step 6: Initial pull
+    step(6, "Initial Message Pull")
+    let pulled = await pullMessagesForSetup(workspaceId)
+    if (!pulled) {
       let cont = await confirm("Continue anyway?", true)
       if (!cont) {
         console.log("Setup paused. Fix the issue and re-run `msgmon setup`.")

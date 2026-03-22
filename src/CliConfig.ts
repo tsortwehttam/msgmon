@@ -33,7 +33,7 @@ let prependedConfigDirs: string[] = []
 
 /**
  * Prepend a config directory to the resolution chain.
- * Used by server-managed workspaces to inject a workspace-local .msgmon/ dir
+ * Used by server workspaces to inject a workspace-local .msgmon/ dir
  * so tokens/credentials there are found before the cwd fallback.
  */
 export let prependConfigDir = (dir: string) => {

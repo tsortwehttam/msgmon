@@ -14,7 +14,7 @@ msgmon --help
 
 msgmon uses a server/client directory model:
 
-- A **server workspace** holds `inbox/`, `context/`, `drafts/`, `status.md`, `AGENTS.md`, and a hidden `.msgmon/` folder for secrets and state.
+- A **server workspace** holds `messages/`, `drafts/`, `status.md`, `AGENTS.md`, and a hidden `.msgmon/` folder for secrets and state.
 - A **client** directory receives an agent-safe mirror — no credentials exposed.
 
 ```bash
@@ -32,7 +32,15 @@ msgmon client start \
   --agent-command='codex .'
 ```
 
-The agent sees only exported files plus `.msgmon-session/` sync metadata. New messages arrive via periodic refresh — either `msgmon server refresh ./workspace` on a cron, or `POST /api/workspace/refresh` through the server.
+The agent sees only exported files plus `.msgmon-session/` sync metadata. New messages arrive via explicit pulls — either `msgmon server pull ./workspace` on a cron, or `POST /api/workspace/pull` through the server.
+
+Typical recurring server-side pull:
+
+```bash
+msgmon server pull ./workspace
+```
+
+That command is incremental by default. It uses the newest timestamp already present in `messages/` as the next `--since`, and uses the current timestamp as `--until`.
 
 To add more accounts later, re-run `msgmon setup` — it skips completed steps and prompts for new ones.
 
@@ -109,18 +117,41 @@ Directory-based server workspace lifecycle.
 
 ```bash
 msgmon server init ./workspace --account=default --query='in:inbox category:primary is:unread'
-msgmon server refresh ./workspace
-msgmon server context-sync ./workspace --since=2026-03-01
+msgmon server pull ./workspace
+msgmon server pull ./workspace --since=2026-03-01T00:00:00Z --until=2026-03-22T12:00:00Z
 msgmon server show ./workspace
 ```
 
 Server workspaces contain:
-- `inbox/` — new actionable messages
-- `context/` — historical reference messages
+- `messages/` — pulled message JSON files
 - `drafts/` — draft JSON files
 - `workspace.json`, `AGENTS.md`, `status.md`
 
-On first setup, `msgmon setup` bootstraps history into `context/` and seeds the inbox boundary so old unread messages don't flood `inbox/`. After that, `refresh` only pulls new items while `context-sync` backfills history on demand.
+`msgmon server pull` is the single server-side fetch operation. Every message that matches the pull filters and time range is written to `messages/`. Nothing is routed to a separate `inbox/` or `context/` directory anymore.
+
+The pull decision is concrete:
+- filter set: the workspace query by default, or `--query` for a one-off Gmail override, plus configured Slack channels or `--slack-channels`
+- lower bound: `--since` if provided; otherwise the newest existing message timestamp in `messages/`; otherwise `pullWindowDays` from `workspace.json`
+- upper bound: `--until` if provided; otherwise the exact current timestamp
+
+Examples:
+
+```bash
+# normal incremental pull
+msgmon server pull ./workspace
+
+# backfill a fixed window once
+msgmon server pull ./workspace \
+  --since=2026-03-01T00:00:00Z \
+  --until=2026-03-22T12:00:00Z
+
+# override the Gmail query for a one-off pull
+msgmon server pull ./workspace \
+  --query='from:billing@example.com' \
+  --since=2026-03-20T00:00:00Z
+```
+
+That means the server does not decide “inbox vs context.” It only decides whether a message matches the current pull filters and falls inside the current pull window.
 
 ### `msgmon serve`
 

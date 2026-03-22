@@ -33,10 +33,19 @@ export let loadGmailProjectId = (): string | undefined => {
 export let gmailClient = (account: string, verbose = false) =>
   google.gmail({ version: "v1", auth: loadOAuth(account, verbose) })
 
+let timestampMs = (value?: string) => {
+  if (!value) return undefined
+  let ms = Date.parse(value)
+  if (!Number.isFinite(ms)) throw new Error(`Invalid time bound "${value}"`)
+  return ms
+}
+
 export let gmailSource: MessageSource = {
   async *listMessages(params) {
     let client = gmailClient(params.account, params.verbose)
     let pageToken: string | undefined
+    let oldest = timestampMs(params.oldest)
+    let latest = timestampMs(params.latest)
 
     let yielded = 0
     while (true) {
@@ -60,7 +69,11 @@ export let gmailSource: MessageSource = {
           id: ref.id!,
           format: "full",
         })
-        yield toUnifiedMessage(fetched.data)
+        let unified = toUnifiedMessage(fetched.data)
+        let messageTimestamp = timestampMs(unified.timestamp)
+        if (oldest != null && messageTimestamp != null && messageTimestamp < oldest) continue
+        if (latest != null && messageTimestamp != null && messageTimestamp > latest) continue
+        yield unified
         yielded += 1
       }
 

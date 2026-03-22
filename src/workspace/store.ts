@@ -12,9 +12,7 @@ export interface WorkspaceConfig {
   name: string
   accounts: string[]
   query: string
-  contextWindowDays: number
-  contextMaxResults: number
-  contextQuery?: string
+  pullWindowDays: number
   slackChannels?: string[]
   createdAt: string
   updatedAt: string
@@ -40,7 +38,7 @@ export type WorkspaceBundle = {
   files: WorkspaceExportFile[]
 }
 
-let WORKSPACE_DIRS = ["inbox", "context", "drafts"] as const
+let WORKSPACE_DIRS = ["messages", "drafts"] as const
 let SERVER_DIRNAME = ".server"
 
 let DEFAULT_AGENTS = `# AGENTS.md
@@ -53,8 +51,7 @@ is happening, identify what matters, and produce useful outputs for the user.
 
 ## What You Should Do
 
-- Read \`inbox/\` for newly ingested actionable messages.
-- Read \`context/\` for historical background, prior threads, and relationship context.
+- Read \`messages/\` for the pulled message history.
 - The first thing you should do is tell the user the new important information they need to know now, especially urgent issues, deadlines, risks, notable updates, or anything that changes priorities.
 - After that, tell the user the next actions you recommend taking.
 - Then ask the user whether you should proceed.
@@ -77,14 +74,13 @@ is happening, identify what matters, and produce useful outputs for the user.
 workspace.json  — read-only workspace metadata
 AGENTS.md       — this file
 status.md       — working summary maintained by the agent
-inbox/          — newly ingested actionable message JSON files (read-only)
-context/        — historical reference message JSON files (read-only)
+messages/       — pulled message JSON files (read-only)
 drafts/         — draft JSON files the agent may create or revise
 \`\`\`
 
 ## Rules
 
-- Treat \`workspace.json\`, \`inbox/\`, and \`context/\` as read-only.
+- Treat \`workspace.json\` and \`messages/\` as read-only.
 - \`status.md\` must be kept accurate. Do not leave it stale after reviewing messages, creating drafts, researching issues, or changing plans.
 - Never send a message without explicit user approval.
 - Do not assume local tools can safely mutate remote state.
@@ -119,9 +115,7 @@ let WorkspaceConfigSchema = z.object({
   name: z.string().min(1),
   accounts: z.array(z.string()).min(1),
   query: z.string(),
-  contextWindowDays: z.number().int().min(1).default(14),
-  contextMaxResults: z.number().int().min(1).default(200),
-  contextQuery: z.string().optional(),
+  pullWindowDays: z.number().int().min(1).default(14),
   slackChannels: z.array(z.string()).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -233,9 +227,7 @@ export let initWorkspace = (
     name?: string
     accounts?: string[]
     query?: string
-    contextWindowDays?: number
-    contextMaxResults?: number
-    contextQuery?: string
+    pullWindowDays?: number
     slackChannels?: string[]
     overwrite?: boolean
   } = {},
@@ -264,9 +256,7 @@ export let initWorkspace = (
     name: options.name ?? id,
     accounts: options.accounts ?? ["default"],
     query: options.query ?? DEFAULT_GMAIL_WORKSPACE_QUERY,
-    contextWindowDays: options.contextWindowDays ?? 14,
-    contextMaxResults: options.contextMaxResults ?? 200,
-    contextQuery: options.contextQuery?.trim() || undefined,
+    pullWindowDays: options.pullWindowDays ?? 14,
     slackChannels: options.slackChannels?.length ? options.slackChannels : undefined,
     createdAt: now,
     updatedAt: now,
@@ -368,9 +358,7 @@ export let importWorkspaceBundle = (params: {
     name: bundle.config.name,
     accounts: bundle.config.accounts,
     query: bundle.config.query,
-    contextWindowDays: bundle.config.contextWindowDays,
-    contextMaxResults: bundle.config.contextMaxResults,
-    contextQuery: bundle.config.contextQuery,
+    pullWindowDays: bundle.config.pullWindowDays,
     overwrite: params.overwrite,
   })
   writeSnapshotFiles(workspaceId, bundle.files)
@@ -423,13 +411,5 @@ export let applyWorkspacePush = (
   return {
     ...exportWorkspaceSnapshot(workspaceId),
     config: nextConfig,
-  }
-}
-
-export let writeWorkspaceMessage = (workspaceId: string, msgDirName: string, files: Record<string, string | Buffer>) => {
-  let root = path.resolve(workspaceRoot(workspaceId), "inbox", msgDirName)
-  fs.mkdirSync(root, { recursive: true })
-  for (let [name, content] of Object.entries(files)) {
-    fs.writeFileSync(path.resolve(root, name), content)
   }
 }

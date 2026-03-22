@@ -19,9 +19,7 @@ export type WorkspaceSnapshot = {
     name: string
     accounts: string[]
     query: string
-    contextWindowDays: number
-    contextMaxResults: number
-    contextQuery?: string
+    pullWindowDays: number
     createdAt: string
     updatedAt: string
   }
@@ -262,7 +260,7 @@ export let syncPush = async (params: {
 }) => {
   let dir = path.resolve(params.dir ?? defaultSessionDir())
   let state = loadState(dir)
-  if (!state) throw new Error(`No session state found in "${dir}". Run sync pull first.`)
+  if (!state) throw new Error(`No client state found in "${dir}". Run client pull first.`)
 
   let serverUrl = params.serverUrl ?? state.serverUrl
   let token = params.token ?? state.token
@@ -380,11 +378,8 @@ export let startSession = async (params: {
     await request({
       serverUrl: connection.serverUrl,
       token: connection.token,
-      route: "/api/workspace/refresh",
-      body: {
-        workspaceId,
-        syncContext: true,
-      },
+      route: "/api/workspace/pull",
+      body: { workspaceId },
     })
   } catch {
     // Session start should still work for read-only tokens; best-effort reconcile only.
@@ -445,6 +440,6 @@ export let stopSessionWatch = (dir: string) => {
 
 export let loadSessionState = (dir: string) => {
   let state = loadState(path.resolve(dir))
-  if (!state) throw new Error(`No session state found in "${dir}"`)
+  if (!state) throw new Error(`No client state found in "${dir}"`)
   return state
 }

@@ -6,7 +6,7 @@ import { setWorkspaceDir } from "../CliConfig"
 import { DEFAULT_WORKSPACE_ID } from "../defaults"
 import { inferWorkspaceAccounts } from "./accounts"
 import { initWorkspace, loadWorkspaceConfig, listWorkspaceIds } from "./store"
-import { refreshWorkspace, syncWorkspaceContext } from "./runtime"
+import { pullWorkspaceMessages } from "./runtime"
 import { verboseLog } from "../Verbose"
 import { DEFAULT_GMAIL_WORKSPACE_QUERY } from "../defaults"
 
@@ -55,19 +55,10 @@ export let configureServerCli = (cli: Argv) =>
             default: DEFAULT_GMAIL_WORKSPACE_QUERY,
             describe: "Default ingest query",
           })
-          .option("context-window-days", {
+          .option("pull-window-days", {
             type: "number",
             default: 14,
-            describe: "Default historical context window in days",
-          })
-          .option("context-max-results", {
-            type: "number",
-            default: 200,
-            describe: "Maximum historical context messages to sync per account",
-          })
-          .option("context-query", {
-            type: "string",
-            describe: "Optional Gmail-only base query for historical context sync",
+            describe: "Default lookback window in days when --since is omitted and no messages exist yet",
           })
           .option("overwrite", {
             type: "boolean",
@@ -86,9 +77,7 @@ export let configureServerCli = (cli: Argv) =>
           name: argv.name ?? path.basename(dir),
           accounts,
           query: argv.query,
-          contextWindowDays: argv.contextWindowDays,
-          contextMaxResults: argv.contextMaxResults,
-          contextQuery: argv.contextQuery,
+          pullWindowDays: argv.pullWindowDays,
           overwrite: argv.overwrite,
         })
 
@@ -102,19 +91,19 @@ export let configureServerCli = (cli: Argv) =>
       },
     )
     .command(
-      "refresh [dir]",
-      "Ingest new messages into the server workspace inbox",
+      "pull [dir]",
+      "Pull messages into the server workspace messages/ directory",
       y =>
         withDir(y)
           .option("max-results", {
             type: "number",
             default: 100,
-            describe: "Maximum messages per account per refresh",
+            describe: "Maximum messages per account per pull",
           })
           .option("mark-read", {
             type: "boolean",
             default: false,
-            describe: "Mark messages as read after successful ingest",
+            describe: "Mark messages as read after successful pull",
           })
           .option("save-attachments", {
             type: "boolean",
@@ -124,25 +113,30 @@ export let configureServerCli = (cli: Argv) =>
           .option("seed", {
             type: "boolean",
             default: false,
-            describe: "Record IDs in state without writing inbox files",
+            describe: "Record IDs in state without writing message files",
           })
-          .option("sync-context", {
-            type: "boolean",
-            default: false,
-            describe: "Also sync historical context into context/",
-          })
-          .option("context-max-results", {
-            type: "number",
-            describe: "Override context max-results for this run",
-          })
-          .option("context-since", {
+          .option("query", {
             type: "string",
-            describe: "Backfill context since YYYY-MM-DD",
+            describe: "Override the configured Gmail query for this pull",
           })
-          .option("clear-context", {
+          .option("slack-channels", {
+            type: "array",
+            string: true,
+            coerce: normalizeMultiValue,
+            describe: "Override monitored Slack channels for this pull (repeatable, comma-separated)",
+          })
+          .option("since", {
+            type: "string",
+            describe: "Lower time bound as ISO timestamp or YYYY-MM-DD. Defaults to the newest pulled message timestamp, or the configured pull window when empty.",
+          })
+          .option("until", {
+            type: "string",
+            describe: "Upper time bound as ISO timestamp or YYYY-MM-DD. Defaults to the current timestamp.",
+          })
+          .option("clear", {
             type: "boolean",
             default: false,
-            describe: "Clear context/ and reset its state before syncing",
+            describe: "Clear messages/ and reset pull state before pulling",
           })
           .option("verbose", {
             alias: "v",
@@ -152,61 +146,19 @@ export let configureServerCli = (cli: Argv) =>
           }),
       async argv => {
         let dir = resolveWorkspaceDir(argv.dir)
-        verboseLog(argv.verbose, "server refresh", { dir, maxResults: argv.maxResults })
-        let result = await refreshWorkspace({
+        verboseLog(argv.verbose, "server pull", { dir, maxResults: argv.maxResults, since: argv.since, until: argv.until })
+        let result = await pullWorkspaceMessages({
           workspaceId: DEFAULT_WORKSPACE_ID,
           maxResults: argv.maxResults,
           markRead: argv.markRead,
           saveAttachments: argv.saveAttachments,
           seed: argv.seed,
-          syncContext: argv.syncContext,
-          contextMaxResults: argv.contextMaxResults,
-          contextSince: argv.contextSince,
-          clearContext: argv.clearContext,
-          verbose: argv.verbose,
-        })
-        console.log(JSON.stringify({ path: dir, workspaceId: DEFAULT_WORKSPACE_ID, ...result }, null, 2))
-      },
-    )
-    .command(
-      "context-sync [dir]",
-      "Sync historical context into context/",
-      y =>
-        withDir(y)
-          .option("max-results", {
-            type: "number",
-            default: 200,
-            describe: "Maximum context messages per account per sync",
-          })
-          .option("since", {
-            type: "string",
-            describe: "Backfill context since YYYY-MM-DD",
-          })
-          .option("clear", {
-            type: "boolean",
-            default: false,
-            describe: "Clear context/ and reset its state before syncing",
-          })
-          .option("save-attachments", {
-            type: "boolean",
-            default: false,
-            describe: "Download and save attachments into context/",
-          })
-          .option("verbose", {
-            alias: "v",
-            type: "boolean",
-            default: false,
-            describe: "Print diagnostic details to stderr",
-          }),
-      async argv => {
-        let dir = resolveWorkspaceDir(argv.dir)
-        let result = await syncWorkspaceContext({
-          workspaceId: DEFAULT_WORKSPACE_ID,
-          maxResults: argv.maxResults,
-          saveAttachments: argv.saveAttachments,
-          verbose: argv.verbose,
+          query: argv.query,
+          slackChannels: argv.slackChannels,
           since: argv.since,
+          until: argv.until,
           clear: argv.clear,
+          verbose: argv.verbose,
         })
         console.log(JSON.stringify({ path: dir, workspaceId: DEFAULT_WORKSPACE_ID, ...result }, null, 2))
       },
@@ -229,7 +181,7 @@ export let configureServerCli = (cli: Argv) =>
         console.log(JSON.stringify({ path: dir, workspaces: listWorkspaceIds() }, null, 2))
       },
     )
-    .demandCommand(1, "Choose a command: init, refresh, context-sync, show, or list.")
+    .demandCommand(1, "Choose a command: init, pull, show, or list.")
     .strict()
     .help()
 

@@ -3,7 +3,7 @@ import path from "node:path"
 import crypto from "node:crypto"
 import { prependConfigDir, LOCAL_CONFIG_DIRNAME } from "../CliConfig"
 import { createJsonFileSink } from "../ingest/sinks"
-import { ingestOnce, readIngestState, writeIngestState } from "../ingest/ingest"
+import { ingestOnce } from "../ingest/ingest"
 import { gmailSource, markGmailRead, fetchGmailAttachment } from "../../platforms/gmail/MailSource"
 import { slackSource, markSlackRead } from "../../platforms/slack/SlackSource"
 import type { MessageSource } from "../ingest/ingest"
@@ -24,39 +24,24 @@ let splitAccounts = (accounts: string[]) => {
   return { gmailAccounts, slackAccounts }
 }
 
-let resolveInboxSources = (accounts: string[], query: string, slackChannels?: string[]): SourceSpec[] => {
-  let { gmailAccounts, slackAccounts } = splitAccounts(accounts)
-  let sources: SourceSpec[] = []
-  if (gmailAccounts.length) sources.push({ source: gmailSource, accounts: gmailAccounts, query })
-  if (slackAccounts.length) {
-    let slackQuery = slackChannels?.length ? slackChannels.join(",") : ""
-    sources.push({ source: slackSource, accounts: slackAccounts, query: slackQuery })
-  }
-  return sources
+let normalizeDateForGmail = (value?: string) => value?.replace(/-/g, "/")
+
+let buildPullGmailQuery = (params: { baseQuery: string; since?: string; until?: string }) => {
+  let terms = [params.baseQuery.trim()]
+  let since = normalizeDateForGmail(params.since)
+  let until = normalizeDateForGmail(params.until)
+  if (since) terms.push(`after:${since}`)
+  if (until) terms.push(`before:${until}`)
+  return terms.filter(Boolean).join(" ").trim()
 }
 
-let buildContextGmailQuery = (params: { baseQuery?: string; windowDays: number; since?: string }) => {
-  let terms = [params.baseQuery?.trim()]
-  if (params.since) {
-    let normalized = params.since.replace(/-/g, "/")
-    terms.push(`after:${normalized}`)
-  } else {
-    terms.push(`newer_than:${params.windowDays}d`)
-  }
-  return terms.filter(Boolean).join(" ")
-}
-
-let buildContextOldestIso = (params: { windowDays: number; since?: string }) => {
-  if (params.since) return new Date(`${params.since}T00:00:00.000Z`).toISOString()
-  return new Date(Date.now() - params.windowDays * 24 * 60 * 60 * 1000).toISOString()
-}
-
-let resolveContextSources = (params: {
+let resolvePullSources = (params: {
   accounts: string[]
-  windowDays: number
-  contextQuery?: string
+  query: string
   slackChannels?: string[]
   since?: string
+  until?: string
+  slackChannelsOverride?: string[]
 }): SourceSpec[] => {
   let { gmailAccounts, slackAccounts } = splitAccounts(params.accounts)
   let sources: SourceSpec[] = []
@@ -64,20 +49,24 @@ let resolveContextSources = (params: {
     sources.push({
       source: gmailSource,
       accounts: gmailAccounts,
-      query: buildContextGmailQuery({
-        baseQuery: params.contextQuery,
-        windowDays: params.windowDays,
+      query: buildPullGmailQuery({
+        baseQuery: params.query,
         since: params.since,
+        until: params.until,
       }),
+      oldest: params.since,
+      latest: params.until,
     })
   }
   if (slackAccounts.length) {
-    let slackQuery = params.slackChannels?.length ? params.slackChannels.join(",") : ""
+    let slackChannels = params.slackChannelsOverride?.length ? params.slackChannelsOverride : params.slackChannels
+    let slackQuery = slackChannels?.length ? slackChannels.join(",") : ""
     sources.push({
       source: slackSource,
       accounts: slackAccounts,
       query: slackQuery,
-      oldest: buildContextOldestIso({ windowDays: params.windowDays, since: params.since }),
+      oldest: params.since,
+      latest: params.until,
     })
   }
   return sources
@@ -88,181 +77,126 @@ let resolveMarkRead = (msg: UnifiedMessage, account: string) => {
   return markGmailRead(msg, account)
 }
 
-export let buildWorkspaceStatePath = (workspaceId: string, accounts: string[], query: string) => {
-  let key = JSON.stringify({ scope: "inbox", accounts: accounts.slice().sort(), query })
+export let buildWorkspacePullStatePath = (workspaceId: string, accounts: string[], query: string, slackChannels?: string[]) => {
+  let key = JSON.stringify({
+    scope: "pull",
+    accounts: accounts.slice().sort(),
+    query,
+    slackChannels: (slackChannels ?? []).slice().sort(),
+  })
   let digest = crypto.createHash("sha256").update(key).digest("hex").slice(0, 16)
-  return path.resolve(workspaceStateRoot(workspaceId), `inbox-${digest}.json`)
+  return path.resolve(workspaceStateRoot(workspaceId), `pull-${digest}.json`)
 }
-
-export let buildWorkspaceContextStatePath = (workspaceId: string) =>
-  path.resolve(workspaceStateRoot(workspaceId), "context-sync.json")
 
 let attachmentFetcher = (accounts: string[]) =>
   async (msg: UnifiedMessage, filename: string) => fetchGmailAttachment(msg, filename, accounts[0] ?? "default")
 
-let ingestToDirectory = async (params: {
+let resolveMessagesDir = (workspaceId: string) =>
+  path.resolve(workspaceRoot(workspaceId), "messages")
+
+let timestampMs = (value?: string) => {
+  if (!value) return undefined
+  let ms = Date.parse(value)
+  if (!Number.isFinite(ms)) throw new Error(`Invalid timestamp "${value}"`)
+  return ms
+}
+
+export let latestPulledMessageTimestamp = (workspaceId: string) => {
+  let dir = resolveMessagesDir(workspaceId)
+  if (!fs.existsSync(dir)) return undefined
+
+  let latest: string | undefined
+  for (let entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) continue
+    try {
+      let raw = JSON.parse(fs.readFileSync(path.resolve(dir, entry.name), "utf8")) as { timestamp?: string }
+      let timestamp = raw.timestamp
+      if (!timestamp) continue
+      if (!latest || Date.parse(timestamp) > Date.parse(latest)) latest = timestamp
+    } catch {
+      continue
+    }
+  }
+  return latest
+}
+
+let defaultPullSince = (workspaceId: string, pullWindowDays: number) => {
+  let latest = latestPulledMessageTimestamp(workspaceId)
+  if (latest) return latest
+  return new Date(Date.now() - pullWindowDays * 24 * 60 * 60 * 1000).toISOString()
+}
+
+let defaultPullUntil = () => new Date().toISOString()
+
+export let pullWorkspaceMessages = async (params: {
   workspaceId: string
-  outDirName: "inbox" | "context"
-  sources: SourceSpec[]
-  query: string
-  statePath: string
   maxResults: number
   markRead: boolean
   saveAttachments: boolean
   seed: boolean
   verbose: boolean
+  query?: string
+  since?: string
+  until?: string
+  slackChannels?: string[]
+  clear?: boolean
 }) => {
   let config = loadWorkspaceConfig(params.workspaceId)
   let root = workspaceRoot(config.id)
-  let outDir = path.resolve(root, params.outDirName)
+  let messagesDir = resolveMessagesDir(config.id)
+  let effectiveQuery = params.query ?? config.query
+  let statePath = buildWorkspacePullStatePath(
+    config.id,
+    config.accounts,
+    effectiveQuery,
+    params.slackChannels?.length ? params.slackChannels : config.slackChannels,
+  )
 
   prependConfigDir(path.resolve(root, LOCAL_CONFIG_DIRNAME))
 
-  let dirSink = createJsonFileSink({
-    outDir,
+  if (params.clear) {
+    fs.rmSync(messagesDir, { recursive: true, force: true })
+    fs.rmSync(statePath, { force: true })
+  }
+
+  let effectiveSince = params.since ?? defaultPullSince(config.id, config.pullWindowDays)
+  let effectiveUntil = params.until ?? defaultPullUntil()
+  let sinceMs = timestampMs(effectiveSince)
+  let untilMs = timestampMs(effectiveUntil)
+  if (sinceMs != null && untilMs != null && sinceMs > untilMs) {
+    throw new Error(`Invalid pull range: since ${effectiveSince} is after until ${effectiveUntil}`)
+  }
+
+  let sink = createJsonFileSink({
+    outDir: messagesDir,
     saveAttachments: params.saveAttachments,
     fetchAttachment: params.saveAttachments ? attachmentFetcher(config.accounts) : undefined,
   })
 
-  return ingestOnce({
-    sources: params.sources,
-    query: params.query,
+  let result = await ingestOnce({
+    sources: resolvePullSources({
+      accounts: config.accounts,
+      query: effectiveQuery,
+      slackChannels: config.slackChannels,
+      slackChannelsOverride: params.slackChannels,
+      since: effectiveSince,
+      until: effectiveUntil,
+    }),
+    query: effectiveQuery,
     maxResults: params.maxResults,
-    sink: dirSink,
-    statePath: params.statePath,
+    sink,
+    statePath,
     markRead: resolveMarkRead,
     doMarkRead: params.markRead,
     seed: params.seed,
     verbose: params.verbose,
   })
-}
-
-export let refreshWorkspace = async (params: {
-  workspaceId: string
-  maxResults: number
-  markRead: boolean
-  saveAttachments: boolean
-  seed: boolean
-  verbose: boolean
-  syncContext?: boolean
-  contextMaxResults?: number
-  contextSaveAttachments?: boolean
-  contextSince?: string
-  clearContext?: boolean
-}) => {
-  let config = loadWorkspaceConfig(params.workspaceId)
-
-  let inbox = await ingestToDirectory({
-    workspaceId: params.workspaceId,
-    outDirName: "inbox",
-    sources: resolveInboxSources(config.accounts, config.query, config.slackChannels),
-    query: config.query,
-    statePath: buildWorkspaceStatePath(config.id, config.accounts, config.query),
-    maxResults: params.maxResults,
-    markRead: params.markRead,
-    saveAttachments: params.saveAttachments,
-    seed: params.seed,
-    verbose: params.verbose,
-  })
-
-  if (!params.syncContext) return { ...inbox, context: undefined }
-
-  let context = await syncWorkspaceContext({
-    workspaceId: params.workspaceId,
-    maxResults: params.contextMaxResults ?? config.contextMaxResults,
-    saveAttachments: params.contextSaveAttachments ?? false,
-    verbose: params.verbose,
-    since: params.contextSince,
-    clear: params.clearContext,
-  })
-
-  return { ...inbox, context }
-}
-
-export let syncWorkspaceContext = async (params: {
-  workspaceId: string
-  maxResults: number
-  saveAttachments: boolean
-  verbose: boolean
-  since?: string
-  clear?: boolean
-}) => {
-  let config = loadWorkspaceConfig(params.workspaceId)
-  let root = workspaceRoot(config.id)
-  let contextDir = path.resolve(root, "context")
-  let statePath = buildWorkspaceContextStatePath(config.id)
-
-  prependConfigDir(path.resolve(root, LOCAL_CONFIG_DIRNAME))
-
-  if (params.clear) {
-    fs.rmSync(contextDir, { recursive: true, force: true })
-    fs.rmSync(statePath, { force: true })
-    fs.mkdirSync(contextDir, { recursive: true })
-  }
-
-  return ingestToDirectory({
-    workspaceId: params.workspaceId,
-    outDirName: "context",
-    sources: resolveContextSources({
-      accounts: config.accounts,
-      windowDays: config.contextWindowDays,
-      contextQuery: config.contextQuery,
-      slackChannels: config.slackChannels,
-      since: params.since,
-    }),
-    query: config.contextQuery ?? "",
-    statePath,
-    maxResults: params.maxResults,
-    markRead: false,
-    saveAttachments: params.saveAttachments,
-    seed: false,
-    verbose: params.verbose,
-  })
-}
-
-export let seedInboxStateFromContextState = (params: {
-  workspaceId: string
-  ids: string[]
-  timestamps: Record<string, string>
-}) => {
-  let config = loadWorkspaceConfig(params.workspaceId)
-  let inboxStatePath = buildWorkspaceStatePath(config.id, config.accounts, config.query)
-  let inboxState = readIngestState(inboxStatePath)
-
-  let seeded = 0
-  for (let id of params.ids) {
-    if (inboxState.ingested[id]) continue
-    inboxState.ingested[id] = params.timestamps[id] ?? new Date().toISOString()
-    seeded += 1
-  }
-
-  if (seeded > 0) writeIngestState(inboxStatePath, inboxState)
-  return { seeded }
-}
-
-export let bootstrapWorkspaceHistory = async (params: {
-  workspaceId: string
-  maxResults: number
-  saveAttachments: boolean
-  verbose: boolean
-  since?: string
-  clear?: boolean
-}) => {
-  let config = loadWorkspaceConfig(params.workspaceId)
-  let contextStatePath = buildWorkspaceContextStatePath(config.id)
-  let before = readIngestState(contextStatePath)
-
-  let context = await syncWorkspaceContext(params)
-  let after = readIngestState(contextStatePath)
-  let newIds = Object.keys(after.ingested).filter(id => !before.ingested[id])
-  let inbox = seedInboxStateFromContextState({
-    workspaceId: params.workspaceId,
-    ids: newIds,
-    timestamps: after.ingested,
-  })
 
   return {
-    ...context,
-    inboxSeeded: inbox.seeded,
+    ...result,
+    query: effectiveQuery,
+    since: effectiveSince,
+    until: effectiveUntil,
+    statePath,
   }
 }

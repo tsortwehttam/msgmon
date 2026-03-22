@@ -1,7 +1,7 @@
 import type { Draft } from "../draft/schema"
 import {
   WorkspaceExportRequest,
-  WorkspaceRefreshRequest,
+  WorkspacePullRequest,
   WorkspaceBootstrapRequest,
   WorkspaceImportRequest,
   WorkspacePushRequest,
@@ -82,21 +82,22 @@ export let createWorkspaceHandlers = (opts: WorkspaceApiOptions): Record<string,
     return { status: 200, data: exportWorkspaceSnapshot(v.data.workspaceId) }
   }
 
-  let handleWorkspaceRefresh: WorkspaceHandler = async body => {
-    let v = validateBody(WorkspaceRefreshRequest, body)
+  let handleWorkspacePull: WorkspaceHandler = async body => {
+    let v = validateBody(WorkspacePullRequest, body)
     if (!v.success) return { status: 400, error: v.error }
     let p = v.data
-    let { refreshWorkspace } = await import("./runtime")
-    let result = await refreshWorkspace({
+    let { pullWorkspaceMessages } = await import("./runtime")
+    let result = await pullWorkspaceMessages({
       workspaceId: p.workspaceId,
       maxResults: p.maxResults,
       markRead: p.markRead,
       saveAttachments: p.saveAttachments,
       seed: p.seed,
-      syncContext: p.syncContext,
-      contextMaxResults: p.contextMaxResults,
-      contextSince: p.contextSince,
-      clearContext: p.clearContext,
+      query: p.query,
+      slackChannels: p.slackChannels,
+      since: p.since,
+      until: p.until,
+      clear: p.clear,
       verbose: false,
     })
     return { status: 200, data: { workspaceId: p.workspaceId, ...result } }
@@ -125,9 +126,7 @@ export let createWorkspaceHandlers = (opts: WorkspaceApiOptions): Record<string,
         name: v.data.name,
         accounts: v.data.accounts,
         query: v.data.query,
-        contextWindowDays: v.data.contextWindowDays,
-        contextMaxResults: v.data.contextMaxResults,
-        contextQuery: v.data.contextQuery,
+        pullWindowDays: v.data.pullWindowDays,
         overwrite: v.data.overwrite,
       })
       return { status: 200, data: { workspaceId: result.config.id, config: result.config, path: result.path } }
@@ -261,7 +260,7 @@ export let createWorkspaceHandlers = (opts: WorkspaceApiOptions): Record<string,
     "POST /api/workspace/export": handleWorkspaceExport,
     "POST /api/workspace/bootstrap": handleWorkspaceBootstrap,
     "POST /api/workspace/import": handleWorkspaceImport,
-    "POST /api/workspace/refresh": handleWorkspaceRefresh,
+    "POST /api/workspace/pull": handleWorkspacePull,
     "POST /api/workspace/push": handleWorkspacePush,
     "POST /api/workspace/actions": handleWorkspaceActions,
   }

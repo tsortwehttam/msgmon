@@ -47,11 +47,11 @@ let addSyncCommands = (cli: Argv) =>
         })
           .option("server", {
             type: "string",
-            describe: "Override server URL from local session state",
+            describe: "Override server URL from local client state",
           })
           .option("token", {
             type: "string",
-            describe: "Override token from local session state",
+            describe: "Override token from local client state",
           }),
       async argv => {
         let result = await syncPush({
@@ -64,7 +64,7 @@ let addSyncCommands = (cli: Argv) =>
     )
     .command(
       "watch",
-      "Poll serve and refresh the local mirror when it changes",
+      "Poll serve and pull updates into the local mirror when it changes",
       y =>
         withShared(y)
           .option("interval-ms", {

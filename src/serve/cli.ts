@@ -143,7 +143,7 @@ export let configureServeCli = (cli: Argv) =>
         "  /api/workspace/export  — Export an agent-safe workspace snapshot or bundle",
         "  /api/workspace/bootstrap — Create a workspace",
         "  /api/workspace/import  — Import a bundled workspace",
-        "  /api/workspace/refresh — Ingest new messages into a workspace inbox",
+        "  /api/workspace/pull    — Pull messages into messages/",
         "  /api/workspace/push    — Push bounded file changes back to the workspace",
         "  /api/workspace/actions — Apply privileged workspace actions via policy checks",
         "",
