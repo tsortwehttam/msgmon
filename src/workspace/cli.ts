@@ -29,20 +29,20 @@ let resolveWorkspaceDir = (dir?: string) => {
 let withDir = (y: Argv) =>
   y.positional("dir", {
     type: "string",
-    describe: "Workspace directory (defaults to current directory)",
+    describe: "Server workspace directory (defaults to current directory)",
   })
 
-export let configureWorkspaceCli = (cli: Argv) =>
+export let configureServerCli = (cli: Argv) =>
   cli
     .usage("Usage: $0 <command> [dir] [options]")
     .command(
       "init [dir]",
-      "Create or initialize a workspace in a directory",
+      "Create or initialize a server workspace in a directory",
       y =>
         withDir(y)
           .option("name", {
             type: "string",
-            describe: "Workspace display name (defaults to directory name)",
+            describe: "Server workspace display name (defaults to directory name)",
           })
           .option("account", {
             type: "array",
@@ -72,7 +72,7 @@ export let configureWorkspaceCli = (cli: Argv) =>
           .option("overwrite", {
             type: "boolean",
             default: false,
-            describe: "Overwrite an existing workspace directory",
+            describe: "Overwrite an existing server directory workspace",
           }),
       async argv => {
         let dir = resolveWorkspaceDir(argv.dir)
@@ -103,7 +103,7 @@ export let configureWorkspaceCli = (cli: Argv) =>
     )
     .command(
       "refresh [dir]",
-      "Ingest new messages into the workspace inbox",
+      "Ingest new messages into the server workspace inbox",
       y =>
         withDir(y)
           .option("max-results", {
@@ -152,7 +152,7 @@ export let configureWorkspaceCli = (cli: Argv) =>
           }),
       async argv => {
         let dir = resolveWorkspaceDir(argv.dir)
-        verboseLog(argv.verbose, "workspace refresh", { dir, maxResults: argv.maxResults })
+        verboseLog(argv.verbose, "server refresh", { dir, maxResults: argv.maxResults })
         let result = await refreshWorkspace({
           workspaceId: DEFAULT_WORKSPACE_ID,
           maxResults: argv.maxResults,
@@ -213,7 +213,7 @@ export let configureWorkspaceCli = (cli: Argv) =>
     )
     .command(
       "show [dir]",
-      "Show workspace configuration for a directory",
+      "Show server workspace configuration for a directory",
       y => withDir(y),
       async argv => {
         resolveWorkspaceDir(argv.dir)
@@ -222,7 +222,7 @@ export let configureWorkspaceCli = (cli: Argv) =>
     )
     .command(
       "list [dir]",
-      "Show whether a directory contains a workspace",
+      "Show whether a directory contains a server workspace",
       y => withDir(y),
       async argv => {
         let dir = resolveWorkspaceDir(argv.dir)
@@ -233,5 +233,5 @@ export let configureWorkspaceCli = (cli: Argv) =>
     .strict()
     .help()
 
-export let parseWorkspaceCli = (args: string[], scriptName = "msgmon workspace") =>
-  configureWorkspaceCli(yargs(args).scriptName(scriptName)).parseAsync()
+export let parseServerCli = (args: string[], scriptName = "msgmon server") =>
+  configureServerCli(yargs(args).scriptName(scriptName)).parseAsync()

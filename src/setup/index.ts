@@ -392,14 +392,14 @@ let pickSlackChannels = async (): Promise<string[]> => {
 }
 
 // ---------------------------------------------------------------------------
-// Workspace setup
+// Server workspace setup
 // ---------------------------------------------------------------------------
 
 let setupWorkspace = async (workspaceId: string, slackChannels?: string[]): Promise<boolean> => {
   let existing = listWorkspaceIds()
 
   if (existing.includes(workspaceId)) {
-    ok(`Workspace already exists in ${process.cwd()}.`)
+    ok(`Server workspace already exists in ${process.cwd()}.`)
     try {
       let config = loadWorkspaceConfig(workspaceId)
       info(`Accounts: ${config.accounts.join(", ")}`)
@@ -413,7 +413,7 @@ let setupWorkspace = async (workspaceId: string, slackChannels?: string[]): Prom
 
   let accounts = inferWorkspaceAccounts()
   if (accounts.length === 0) {
-    fail("No accounts found to create workspace. Complete auth setup first.")
+    fail("No accounts found to create a server workspace. Complete auth setup first.")
     return false
   }
 
@@ -421,22 +421,22 @@ let setupWorkspace = async (workspaceId: string, slackChannels?: string[]): Prom
 
   try {
     let result = initWorkspace(workspaceId, { accounts, slackChannels })
-    ok(`Created workspace at ${result.path}`)
+    ok(`Created server workspace at ${result.path}`)
     info(`Accounts: ${result.config.accounts.join(", ")}`)
     info(`Query: ${result.config.query}`)
     return true
   } catch (err) {
-    fail(`Failed to create workspace: ${err instanceof Error ? err.message : String(err)}`)
+    fail(`Failed to create server workspace: ${err instanceof Error ? err.message : String(err)}`)
     return false
   }
 }
 
 // ---------------------------------------------------------------------------
-// Bootstrap workspace history
+// Bootstrap server workspace history
 // ---------------------------------------------------------------------------
 
 let bootstrapWorkspaceHistoryForSetup = async (workspaceId: string): Promise<boolean> => {
-  info("Bootstrapping workspace history...")
+  info("Bootstrapping server workspace history...")
   let result = await bootstrapWorkspaceHistory({
     workspaceId,
     maxResults: 200,
@@ -458,7 +458,7 @@ let bootstrapWorkspaceHistoryForSetup = async (workspaceId: string): Promise<boo
       }
     } else if (err.includes("Missing token")) {
       fail(`${err}`)
-      console.log("Make sure you've authorized the accounts in this workspace.")
+      console.log("Make sure you've authorized the accounts in this server workspace.")
     } else {
       fail(err)
     }
@@ -530,16 +530,16 @@ export let runSetup = async (options: { workspace?: string }) => {
       }
     }
 
-    // Step 5: Workspace
-    step(5, "Workspace")
+    // Step 5: Server workspace
+    step(5, "Server Workspace")
     let hasWorkspace = await setupWorkspace(workspaceId, slackChannels)
     if (!hasWorkspace) {
-      console.log("Setup could not create workspace. Fix the issues above and re-run.")
+      console.log("Setup could not create the server workspace. Fix the issues above and re-run.")
       return
     }
 
     // Step 6: Bootstrap
-    step(6, "Bootstrapping Workspace History")
+    step(6, "Bootstrapping Server Workspace History")
     let bootstrapped = await bootstrapWorkspaceHistoryForSetup(workspaceId)
     if (!bootstrapped) {
       let cont = await confirm("Continue anyway?", true)
@@ -554,7 +554,7 @@ export let runSetup = async (options: { workspace?: string }) => {
     console.log("Setup complete! To start, run in two terminals:")
     console.log(`  msgmon serve ${JSON.stringify(workspaceDir)}`)
     console.log(`  msgmon client start --server=http://127.0.0.1:3271 --dir=/tmp/agent-sandbox --agent-command='codex .'`)
-    console.log(`The workspace's local server config is stored under ${JSON.stringify(path.resolve(workspaceDir, ".msgmon", "serve.json"))}.`)
+    console.log(`The server workspace's local server config is stored under ${JSON.stringify(path.resolve(workspaceDir, ".msgmon", "serve.json"))}.`)
   } finally {
     rl.close()
   }

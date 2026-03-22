@@ -91,7 +91,7 @@ let addSyncCommands = (cli: Argv) =>
           force: argv.force,
           autoPush: argv.autoPush,
           onTick: result => {
-            console.error(`[msgmon sync] ${result.ok ? "ok" : "skip"}: ${result.message}`)
+            console.error(`[msgmon client] ${result.ok ? "ok" : "skip"}: ${result.message}`)
           },
         })
       },
@@ -144,7 +144,7 @@ let addSessionCommands = (cli: Argv) =>
     )
     .command(
       "status",
-      "Show local session state",
+      "Show local client state",
       y =>
         y.option("dir", {
           type: "string",
@@ -157,7 +157,7 @@ let addSessionCommands = (cli: Argv) =>
     )
     .command(
       "stop",
-      "Stop the detached sync watcher for a local session",
+      "Stop the detached sync watcher for a local client mirror",
       y =>
         y.option("dir", {
           type: "string",
@@ -178,20 +178,5 @@ export let configureClientCli = (cli: Argv) =>
     .strict()
     .help()
 
-export let configureSessionCli = (cli: Argv) =>
-  addSessionCommands(
-    cli
-      .usage("Usage: $0 <command> [options]"),
-  )
-    .demandCommand(1, "Choose a command: start, status, or stop.")
-    .strict()
-    .help()
-
-export let parseSyncCli = (args: string[], scriptName = "msgmon sync") =>
-  configureClientCli(yargs(args).scriptName(scriptName)).parseAsync()
-
 export let parseClientCli = (args: string[], scriptName = "msgmon client") =>
   configureClientCli(yargs(args).scriptName(scriptName)).parseAsync()
-
-export let parseSessionCli = (args: string[], scriptName = "msgmon session") =>
-  configureSessionCli(yargs(args).scriptName(scriptName)).parseAsync()
