@@ -54,7 +54,7 @@ export let configureSetupCli = (cli: Argv) =>
         })
         .option("slack-channels", {
           type: "string",
-          describe: "Slack channels to monitor: \"all\" or comma-separated like \"#general,#eng\"",
+          describe: "Slack channels to monitor: \"all\", or per-account like \"work:#general,work:#eng,personal:#projects\", or bare \"#general,#eng\" for all accounts",
         }))
     .example("$0", "Interactive guided setup in the current directory")
     .example("$0 ./workspace --since=2026-03-15", "Set up with an explicit initial lower time bound")

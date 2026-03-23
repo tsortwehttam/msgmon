@@ -12,7 +12,7 @@ export interface WorkspaceConfig {
   name: string
   accounts: string[]
   query: string
-  slackChannels?: string[]
+  slackChannels?: Record<string, string[]>
   createdAt: string
   updatedAt: string
 }
@@ -115,7 +115,10 @@ let WorkspaceConfigSchema = z.object({
   name: z.string().min(1),
   accounts: z.array(z.string()).min(1),
   query: z.string(),
-  slackChannels: z.array(z.string()).optional(),
+  slackChannels: z.union([
+    z.record(z.array(z.string())),
+    z.array(z.string()).transform(arr => arr.length ? { default: arr } : undefined),
+  ]).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
@@ -226,7 +229,7 @@ export let initWorkspace = (
     name?: string
     accounts?: string[]
     query?: string
-    slackChannels?: string[]
+    slackChannels?: Record<string, string[]>
     overwrite?: boolean
   } = {},
 ) => {
@@ -257,7 +260,7 @@ export let initWorkspace = (
     name: options.name ?? id,
     accounts: options.accounts ?? ["default"],
     query: options.query ?? DEFAULT_GMAIL_WORKSPACE_QUERY,
-    slackChannels: options.slackChannels?.length ? options.slackChannels : undefined,
+    slackChannels: options.slackChannels && Object.keys(options.slackChannels).length ? options.slackChannels : undefined,
     createdAt: now,
     updatedAt: now,
   }

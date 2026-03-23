@@ -391,28 +391,35 @@ let checkSlack = async (opts: SetupOptions): Promise<boolean> => {
 
 let normalizeSlackChannelName = (value: string) => value.trim().replace(/^#/, "").toLowerCase()
 
-let pickSlackChannels = async (opts: SetupOptions): Promise<string[]> => {
-  let slackAccounts = listSlackTokens()
-  if (slackAccounts.length === 0) return []
-
-  let slackChannelsFlag = opts.slackChannels
-
-  // Auto mode with explicit channel list (no API call needed)
-  if (autoMode && slackChannelsFlag && slackChannelsFlag !== "all") {
-    let channels = slackChannelsFlag.split(",").map(s => {
-      let name = s.trim()
-      return name.startsWith("#") ? name : `#${name}`
-    }).filter(s => s.length > 1)
-    return channels
+let parseSlackChannelsFlag = (flag: string): Record<string, string[]> => {
+  let result: Record<string, string[]> = {}
+  for (let entry of flag.split(",").map(s => s.trim()).filter(Boolean)) {
+    let colonIdx = entry.indexOf(":")
+    let account: string
+    let channel: string
+    if (colonIdx !== -1 && !entry.startsWith("#")) {
+      // account:#channel format
+      account = entry.slice(0, colonIdx)
+      channel = entry.slice(colonIdx + 1)
+    } else {
+      // bare #channel — assign to wildcard
+      account = "*"
+      channel = entry
+    }
+    channel = channel.startsWith("#") ? channel : `#${channel}`
+    if (channel.length > 1) {
+      ;(result[account] ??= []).push(channel)
+    }
   }
+  return result
+}
 
-  let accountName = slackAccounts[0]
+let pickSlackChannelsForAccount = async (accountName: string): Promise<string[]> => {
   try {
     let { slackClients, slackReadClient } = await import("../../platforms/slack/slackClient")
     let clients = slackClients(accountName)
     let reader = slackReadClient(clients)
 
-    // Only offer channels the bot can actually read.
     let channels: Array<{ id: string; name: string }> = []
     let skippedUnreadable = 0
     let cursor: string | undefined
@@ -437,8 +444,8 @@ let pickSlackChannels = async (opts: SetupOptions): Promise<string[]> => {
 
     if (channels.length === 0) {
       fail(clients.user
-        ? "No Slack channels found for this user token."
-        : "No Slack channels found that this bot is a member of.")
+        ? `[${accountName}] No Slack channels found for this user token.`
+        : `[${accountName}] No Slack channels found that this bot is a member of.`)
       if (skippedUnreadable > 0) {
         console.log("Invite the bot to the channels you want monitored, then run setup again.")
       }
@@ -446,28 +453,20 @@ let pickSlackChannels = async (opts: SetupOptions): Promise<string[]> => {
     }
 
     let names = channels.map(c => `#${c.name}`)
-    console.log(`Found ${channels.length} channels: ${names.join(", ")}`)
+    console.log(`[${accountName}] Found ${channels.length} channels: ${names.join(", ")}`)
     if (skippedUnreadable > 0) {
-      info(`Skipped ${skippedUnreadable} channel(s) the bot is not a member of.`)
+      info(`[${accountName}] Skipped ${skippedUnreadable} channel(s) the bot is not a member of.`)
     }
 
-    // Auto mode with "all" — return everything
-    if (autoMode && slackChannelsFlag === "all") {
-      return names
-    }
+    if (autoMode) return names
 
-    // Auto mode without channel flag — return all
-    if (autoMode) {
-      return names
-    }
-
-    if (await confirm("Monitor all of these channels?", true)) {
+    if (await confirm(`[${accountName}] Monitor all of these channels?`, true)) {
       return names
     }
 
     let knownByName = new Map(channels.map(channel => [normalizeSlackChannelName(channel.name), `#${channel.name}`]))
     while (true) {
-      let input = await prompt("Enter channels to monitor (comma-separated, e.g. #general,#engineering): ")
+      let input = await prompt(`[${accountName}] Enter channels to monitor (comma-separated, e.g. #general,#engineering): `)
       let raw = input.split(",").map(s => s.trim()).filter(Boolean)
       if (raw.length === 0) {
         console.log("No channels entered.")
@@ -496,23 +495,59 @@ let pickSlackChannels = async (opts: SetupOptions): Promise<string[]> => {
     let msg = err instanceof Error ? err.message : String(err)
     if (msg.includes("missing_scope")) {
       let { BOT_SCOPE_LIST, USER_SCOPE_LIST } = await import("../../platforms/slack/auth")
-      fail("Could not list Slack channels: your Slack token is missing required scopes.")
+      fail(`[${accountName}] Could not list Slack channels: your Slack token is missing required scopes.`)
       console.log(`Bot scopes needed: ${BOT_SCOPE_LIST.join(", ")}`)
       console.log(`User scopes needed: ${USER_SCOPE_LIST.join(", ")}`)
       console.log("Re-run Slack OAuth auth for this account to refresh the saved token scopes:")
       console.log(`  msgmon slack auth --mode=oauth --account=${JSON.stringify(accountName)}`)
       return []
     }
-    fail(`Could not list Slack channels: ${msg}`)
+    fail(`[${accountName}] Could not list Slack channels: ${msg}`)
     return []
   }
+}
+
+let pickSlackChannels = async (opts: SetupOptions): Promise<Record<string, string[]>> => {
+  let slackAccounts = listSlackTokens()
+  if (slackAccounts.length === 0) return {}
+
+  let slackChannelsFlag = opts.slackChannels
+
+  // Auto mode with explicit channel list (no API call needed)
+  if (autoMode && slackChannelsFlag && slackChannelsFlag !== "all") {
+    let parsed = parseSlackChannelsFlag(slackChannelsFlag)
+    // Expand wildcard entries to all accounts
+    if (parsed["*"]) {
+      let wildcard = parsed["*"]
+      delete parsed["*"]
+      for (let account of slackAccounts) {
+        parsed[account] = [...(parsed[account] ?? []), ...wildcard]
+      }
+    }
+    return parsed
+  }
+
+  // Pick channels per account
+  let result: Record<string, string[]> = {}
+  for (let accountName of slackAccounts) {
+    let channels = await pickSlackChannelsForAccount(accountName)
+    if (channels.length > 0) {
+      result[accountName] = channels
+    }
+  }
+  return result
 }
 
 // ---------------------------------------------------------------------------
 // Server workspace setup
 // ---------------------------------------------------------------------------
 
-let setupWorkspace = async (workspaceId: string, slackChannels?: string[]): Promise<boolean> => {
+let formatSlackChannels = (channels?: Record<string, string[]>): string => {
+  if (!channels || !Object.keys(channels).length) return ""
+  return Object.entries(channels).map(([account, chs]) => `${account}: ${chs.join(", ")}`).join("; ")
+}
+
+let setupWorkspace = async (workspaceId: string, slackChannels?: Record<string, string[]>): Promise<boolean> => {
   let existing = listWorkspaceIds()
 
   if (existing.includes(workspaceId)) {
@@ -521,7 +556,8 @@ let setupWorkspace = async (workspaceId: string, slackChannels?: string[]): Prom
       let config = loadWorkspaceConfig(workspaceId)
       info(`Accounts: ${config.accounts.join(", ")}`)
       info(`Query: ${config.query}`)
-      if (config.slackChannels?.length) info(`Slack channels: ${config.slackChannels.join(", ")}`)
+      let chStr = formatSlackChannels(config.slackChannels)
+      if (chStr) info(`Slack channels: ${chStr}`)
       return true
     } catch {
       return true
@@ -557,7 +593,8 @@ let pullMessagesForSetup = async (workspaceId: string, params: { since?: string;
   let setupQuery = DEFAULT_GMAIL_SETUP_QUERY
   info("Pulling initial messages...")
   info(`Gmail query: ${setupQuery}`)
-  if (config.slackChannels?.length) info(`Slack channels: ${config.slackChannels.join(", ")}`)
+  let chStr = formatSlackChannels(config.slackChannels)
+  if (chStr) info(`Slack channels: ${chStr}`)
   if (params.since) info(`Since: ${params.since}`)
   if (params.until) info(`Until: ${params.until}`)
   let result = await pullWorkspaceMessages({
@@ -658,12 +695,13 @@ export let runSetup = async (options: SetupOptions) => {
     ok(`Found ${allAccounts.length} account(s): ${allAccounts.join(", ")}`)
 
     // Step 4: Slack channels
-    let slackChannels: string[] | undefined
+    let slackChannels: Record<string, string[]> | undefined
     if (allAccounts.some(a => a.startsWith("slack:"))) {
       step(4, "Slack Channels")
       slackChannels = await pickSlackChannels(options)
-      if (slackChannels.length > 0) {
-        ok(`Monitoring: ${slackChannels.join(", ")}`)
+      let chStr = formatSlackChannels(slackChannels)
+      if (chStr) {
+        ok(`Monitoring: ${chStr}`)
       } else {
         skip("No Slack channels selected.")
       }

@@ -39,10 +39,10 @@ let buildPullGmailQuery = (params: { baseQuery: string; since?: string; until?: 
 let resolvePullSources = (params: {
   accounts: string[]
   query: string
-  slackChannels?: string[]
+  slackChannels?: Record<string, string[]>
   since?: string
   until?: string
-  slackChannelsOverride?: string[]
+  slackChannelsOverride?: Record<string, string[]>
 }): SourceSpec[] => {
   let { gmailAccounts, slackAccounts } = splitAccounts(params.accounts)
   let sources: SourceSpec[] = []
@@ -60,15 +60,20 @@ let resolvePullSources = (params: {
     })
   }
   if (slackAccounts.length) {
-    let slackChannels = params.slackChannelsOverride?.length ? params.slackChannelsOverride : params.slackChannels
-    let slackQuery = slackChannels?.length ? slackChannels.join(",") : ""
-    sources.push({
-      source: slackSource,
-      accounts: slackAccounts,
-      query: slackQuery,
-      oldest: params.since,
-      latest: params.until,
-    })
+    let channelMap = params.slackChannelsOverride && Object.keys(params.slackChannelsOverride).length
+      ? params.slackChannelsOverride
+      : params.slackChannels
+    for (let account of slackAccounts) {
+      let channels = channelMap?.[account] ?? channelMap?.["*"] ?? []
+      let slackQuery = channels.join(",")
+      sources.push({
+        source: slackSource,
+        accounts: [account],
+        query: slackQuery,
+        oldest: params.since,
+        latest: params.until,
+      })
+    }
   }
   return sources
 }
@@ -163,7 +168,7 @@ export let pullWorkspaceMessages = async (params: {
   query?: string
   since?: string
   until?: string
-  slackChannels?: string[]
+  slackChannels?: Record<string, string[]>
   clear?: boolean
 }) => {
   let config = loadWorkspaceConfig(params.workspaceId)

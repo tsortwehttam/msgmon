@@ -142,7 +142,7 @@ export let configureServerCli = (cli: Argv) =>
           markRead: argv.markRead,
           saveAttachments: argv.saveAttachments,
           query: argv.query,
-          slackChannels: argv.slackChannels,
+          slackChannels: argv.slackChannels?.length ? { "*": argv.slackChannels } : undefined,
           since: argv.since,
           until: argv.until,
           clear: argv.clear,

@@ -132,7 +132,7 @@ export let WorkspacePullRequest = WorkspaceIdParam.extend({
   markRead: z.boolean().default(false),
   saveAttachments: z.boolean().default(false),
   query: z.string().optional(),
-  slackChannels: z.array(z.string()).optional(),
+  slackChannels: z.record(z.array(z.string())).optional(),
   since: z.string().optional(),
   until: z.string().optional(),
   clear: z.boolean().default(false),
