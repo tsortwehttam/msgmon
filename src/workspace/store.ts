@@ -115,10 +115,7 @@ let WorkspaceConfigSchema = z.object({
   name: z.string().min(1),
   accounts: z.array(z.string()).min(1),
   query: z.string(),
-  slackChannels: z.union([
-    z.record(z.array(z.string())),
-    z.array(z.string()).transform(arr => arr.length ? { default: arr } : undefined),
-  ]).optional(),
+  slackChannels: z.record(z.array(z.string())).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
